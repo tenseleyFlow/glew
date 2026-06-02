@@ -36,6 +36,14 @@ static int           g_input_ev_sent;
 static int           g_input_ev_recv;
 static int           g_remote_mod_held; /* track mod key state during receiving */
 
+/* motion tracking: sender converts absolute → delta, receiver accumulates */
+static double        g_cap_prev_x, g_cap_prev_y;
+static int           g_cap_first_motion;
+static double        g_virt_x, g_virt_y;  /* virtual cursor on receiving side [0,1] */
+
+/* cooldown: suppress edge checks briefly after entering a machine */
+static uint64_t      g_edge_cooldown_until;
+
 /* keysyms for the WM mod key — determined per WM type */
 static uint32_t g_mod_keysyms[4];
 static int      g_mod_keysym_count;
@@ -141,12 +149,29 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
     glew_msg_t msg = { .type = MSG_INPUT };
     msg.input.type = ev->type;
     msg.input.keysym = ev->keysym;
-    msg.input.x = ev->x;
-    msg.input.y = ev->y;
     msg.input.button = ev->button;
     msg.input.scroll_x = ev->scroll_x;
     msg.input.scroll_y = ev->scroll_y;
     msg.input.mods = ev->mods;
+
+    if (ev->type == INPUT_MOTION) {
+        if (g_cap_first_motion) {
+            g_cap_prev_x = ev->x;
+            g_cap_prev_y = ev->y;
+            g_cap_first_motion = 0;
+            return;
+        }
+        msg.input.x = ev->x - g_cap_prev_x;
+        msg.input.y = ev->y - g_cap_prev_y;
+        g_cap_prev_x = ev->x;
+        g_cap_prev_y = ev->y;
+        if (msg.input.x == 0.0 && msg.input.y == 0.0)
+            return;
+    } else {
+        msg.input.x = ev->x;
+        msg.input.y = ev->y;
+    }
+
     peer_send(g_input_target, &msg);
 }
 
@@ -172,6 +197,7 @@ static void start_sending_input(peer_t *target)
     g_input_mode = MODE_REMOTE_SENDING;
     g_input_target = target;
     g_input_ev_sent = 0;
+    g_cap_first_motion = 1;
 
     glew_msg_t start = { .type = MSG_INPUT_START };
     snprintf(start.input_start.source, sizeof(start.input_start.source),
@@ -312,9 +338,13 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
             break;
         }
 
-        /* normal incoming focus */
+        /* normal incoming focus — set virtual cursor at entry edge */
         LOG_INFO("focus entering from %s (source: %s)",
                  msg->focus_enter.from_direction, msg->focus_enter.source);
+
+        if (from == DIR_LEFT)       { g_virt_x = 0.0;  g_virt_y = 0.5; }
+        else if (from == DIR_RIGHT) { g_virt_x = 1.0;  g_virt_y = 0.5; }
+        else                        { g_virt_x = 0.5;  g_virt_y = 0.5; }
 
         int rc = g_driver->focus_edge(from);
 
@@ -333,6 +363,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         g_input_mode = MODE_REMOTE_RECEIVING;
         g_input_source = p;
         g_input_ev_recv = 0;
+        g_edge_cooldown_until = uv_now(g_loop) + 500;
         break;
 
     case MSG_INPUT_STOP:
@@ -411,11 +442,24 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
             }
         }
 
-        /* check mouse edge crossing */
+        /* motion: accumulate deltas into virtual cursor */
         if (ev.type == INPUT_MOTION) {
+            g_virt_x += ev.x;
+            g_virt_y += ev.y;
+
+            /* check edge crossing (with cooldown) */
+            int past_cooldown = (uv_now(g_loop) >= g_edge_cooldown_until);
             direction_t edge_dir = -1;
-            if (ev.x <= 0.001) edge_dir = DIR_LEFT;
-            else if (ev.x >= 0.999) edge_dir = DIR_RIGHT;
+            if (past_cooldown) {
+                if (g_virt_x <= 0.0)  edge_dir = DIR_LEFT;
+                if (g_virt_x >= 1.0)  edge_dir = DIR_RIGHT;
+            }
+
+            /* clamp to screen bounds */
+            if (g_virt_x < 0.0) g_virt_x = 0.0;
+            if (g_virt_x > 1.0) g_virt_x = 1.0;
+            if (g_virt_y < 0.0) g_virt_y = 0.0;
+            if (g_virt_y > 1.0) g_virt_y = 1.0;
 
             if ((int)edge_dir >= 0) {
                 int target_idx;
@@ -442,6 +486,10 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                     }
                 }
             }
+
+            /* inject at virtual position */
+            ev.x = g_virt_x;
+            ev.y = g_virt_y;
         }
 
         input_inject_event(&ev);

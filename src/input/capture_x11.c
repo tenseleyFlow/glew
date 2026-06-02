@@ -258,6 +258,7 @@ void input_capture_stop(void)
 static edge_cb_t   g_edge_cb;
 static void        *g_edge_ud;
 static int          edge_triggered;
+static uint64_t     edge_start_time;
 
 static void on_edge_poll(uv_timer_t *timer)
 {
@@ -292,7 +293,8 @@ void input_edge_watch_start(edge_cb_t cb, void *userdata)
 {
     g_edge_cb = cb;
     g_edge_ud = userdata;
-    edge_triggered = 0;
+    edge_triggered = 1;  /* start suppressed — require mouse to leave edge first */
+    edge_start_time = uv_now(edge_timer.loop);
     uv_timer_start(&edge_timer, on_edge_poll, EDGE_POLL_MS, EDGE_POLL_MS);
     LOG_DBG("edge watch: started (poll every %dms)", EDGE_POLL_MS);
 }
