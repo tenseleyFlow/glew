@@ -11,6 +11,7 @@
 static Display      *dpy;
 static Window        root;
 static int           screen_w, screen_h;
+static Cursor        blank_cursor;
 static uv_timer_t    poll_timer;
 static uv_timer_t    safety_timer;
 static uv_timer_t    grab_retry_timer;
@@ -138,6 +139,12 @@ int input_capture_init(uv_loop_t *loop)
     screen_w = DisplayWidth(dpy, screen);
     screen_h = DisplayHeight(dpy, screen);
 
+    /* create an invisible cursor for hiding during grab */
+    Pixmap pm = XCreatePixmap(dpy, root, 1, 1, 1);
+    XColor black = {0};
+    blank_cursor = XCreatePixmapCursor(dpy, pm, pm, &black, &black, 0, 0);
+    XFreePixmap(dpy, pm);
+
     uv_timer_init(loop, &poll_timer);
     uv_timer_init(loop, &safety_timer);
     uv_timer_init(loop, &grab_retry_timer);
@@ -163,7 +170,7 @@ static int try_grab(void)
 
     int ptr = XGrabPointer(dpy, root, True,
                  PointerMotionMask | ButtonPressMask | ButtonReleaseMask,
-                 GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+                 GrabModeAsync, GrabModeAsync, None, blank_cursor, CurrentTime);
     XFlush(dpy);
 
     if (ptr != GrabSuccess) {

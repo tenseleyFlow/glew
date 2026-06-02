@@ -69,6 +69,22 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
     peer_send(g_input_target, &msg);
 }
 
+static void flush_modifiers(peer_t *target)
+{
+    static const uint32_t mod_keysyms[] = {
+        0xffe1, 0xffe2, /* Shift_L, Shift_R */
+        0xffe3, 0xffe4, /* Control_L, Control_R */
+        0xffe9, 0xffea, /* Alt_L, Alt_R */
+        0xffeb, 0xffec, /* Super_L, Super_R */
+    };
+    for (int i = 0; i < 8; i++) {
+        glew_msg_t m = { .type = MSG_INPUT };
+        m.input.type = INPUT_KEY_UP;
+        m.input.keysym = mod_keysyms[i];
+        peer_send(target, &m);
+    }
+}
+
 static void start_sending_input(peer_t *target)
 {
     g_input_mode = MODE_REMOTE_SENDING;
@@ -80,6 +96,8 @@ static void start_sending_input(peer_t *target)
              "%s", g_cfg.self_name);
     start.input_start.mods = 0;
     peer_send(target, &start);
+
+    flush_modifiers(target);
 
     input_capture_start(on_captured_input, NULL);
     LOG_INFO("input: capturing and forwarding to %s", target->name);
