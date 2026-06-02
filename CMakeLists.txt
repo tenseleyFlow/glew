@@ -8,6 +8,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Warnings
 add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-format-truncation)
 
+# libuv
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(UV REQUIRED libuv)
+
 # Embedded deps
 add_library(cjson STATIC deps/cJSON.c)
 target_include_directories(cjson PUBLIC ${CMAKE_SOURCE_DIR}/deps)
@@ -26,9 +30,16 @@ set(COMMON_SOURCES
     src/drivers/gar.c
 )
 
+# glewd-specific sources
+set(DAEMON_SOURCES
+    src/net/proto.c
+    src/net/peer.c
+)
+
 # glew CLI
 add_executable(glew
     src/glew.c
+    src/net/proto.c
     ${COMMON_SOURCES}
 )
 target_include_directories(glew PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -38,9 +49,11 @@ target_link_libraries(glew PRIVATE cjson tomlc99)
 add_executable(glewd
     src/glewd.c
     ${COMMON_SOURCES}
+    ${DAEMON_SOURCES}
 )
-target_include_directories(glewd PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(glewd PRIVATE cjson tomlc99)
+target_include_directories(glewd PRIVATE ${CMAKE_SOURCE_DIR}/src ${UV_INCLUDE_DIRS})
+target_link_libraries(glewd PRIVATE cjson tomlc99 ${UV_LIBRARIES})
+target_link_directories(glewd PRIVATE ${UV_LIBRARY_DIRS})
 
 # Install
 install(TARGETS glew glewd RUNTIME DESTINATION bin)
