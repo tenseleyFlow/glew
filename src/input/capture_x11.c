@@ -25,6 +25,9 @@ static int            saved_x, saved_y;
 
 #define POLL_INTERVAL_MS   2
 #define SAFETY_TIMEOUT_MS  60000
+#define EDGE_POLL_MS       50
+#define EDGE_ZONE_PX       2
+#define EDGE_REARM_PX      100
 
 static uint32_t x_mods_to_mask(unsigned int state)
 {
@@ -264,7 +267,17 @@ void input_capture_stop(void)
 
     XUngrabKeyboard(dpy, CurrentTime);
     XUngrabPointer(dpy, CurrentTime);
-    XWarpPointer(dpy, None, root, 0, 0, 0, 0, saved_x, saved_y);
+
+    /* restore cursor near saved position but offset away from screen edges
+     * to prevent immediate re-trigger by the edge watcher */
+    int restore_x = saved_x;
+    int restore_y = saved_y;
+    if (restore_x <= EDGE_ZONE_PX + 50)
+        restore_x = 50;
+    if (restore_x >= screen_w - 1 - EDGE_ZONE_PX - 50)
+        restore_x = screen_w - 50;
+
+    XWarpPointer(dpy, None, root, 0, 0, 0, 0, restore_x, restore_y);
     XFlush(dpy);
 
     grabbing = 0;
@@ -281,9 +294,6 @@ void input_capture_stop(void)
 }
 
 /* ── Edge watching ───────────────────────────────────────────────── */
-
-#define EDGE_POLL_MS    50
-#define EDGE_ZONE_PX    2
 
 static edge_cb_t   g_edge_cb;
 static void        *g_edge_ud;
@@ -303,11 +313,13 @@ static void on_edge_poll(uv_timer_t *timer)
 
     int at_left  = (rx <= EDGE_ZONE_PX);
     int at_right = (rx >= screen_w - 1 - EDGE_ZONE_PX);
+    int in_safe_zone = (rx > EDGE_REARM_PX && rx < screen_w - 1 - EDGE_REARM_PX);
 
-    if (!at_left && !at_right) {
+    if (in_safe_zone)
         edge_triggered = 0;
+
+    if (!at_left && !at_right)
         return;
-    }
 
     if (edge_triggered)
         return;
