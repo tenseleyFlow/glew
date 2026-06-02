@@ -77,6 +77,8 @@ static void flush_modifiers(peer_t *target)
         0xffe9, 0xffea, /* Alt_L, Alt_R */
         0xffeb, 0xffec, /* Super_L, Super_R */
     };
+    LOG_DBG("input: flushing %d modifier key-ups to %s",
+            (int)(sizeof(mod_keysyms)/sizeof(mod_keysyms[0])), target->name);
     for (int i = 0; i < 8; i++) {
         glew_msg_t m = { .type = MSG_INPUT };
         m.input.type = INPUT_KEY_UP;
@@ -262,6 +264,10 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
             .mods     = msg->input.mods,
         };
         g_input_ev_recv++;
+        if (ev.type == INPUT_KEY_DOWN)
+            LOG_DBG("inject: KEY_DN keysym=0x%x mods=0x%x", ev.keysym, ev.mods);
+        else if (ev.type == INPUT_KEY_UP)
+            LOG_DBG("inject: KEY_UP keysym=0x%x", ev.keysym);
         input_inject_event(&ev);
         break;
     }
