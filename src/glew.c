@@ -1,6 +1,7 @@
 #include "config.h"
 #include "log.h"
 #include "version.h"
+#include "drivers/driver.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -31,6 +32,35 @@ static const struct option longopts[] = {
     { "help",    no_argument,       NULL, 'h' },
     { NULL, 0, NULL, 0 },
 };
+
+static int cmd_focus(const glew_config_t *cfg, const char *dir_str)
+{
+    const wm_driver_t *drv = driver_by_name(cfg->self_wm);
+    if (!drv) {
+        LOG_ERR("unsupported wm: %s", cfg->self_wm);
+        return 1;
+    }
+
+    if (drv->init(NULL) != 0)
+        return 1;
+
+    direction_t dir = direction_parse(dir_str);
+
+    int can = drv->can_focus(dir);
+    if (can) {
+        drv->do_focus(dir);
+        LOG_DBG("focus %s: moved within %s", dir_str, drv->name);
+        drv->shutdown();
+        return 0;
+    }
+
+    /* at the edge — overflow */
+    printf("overflow:%s\n", dir_str);
+    LOG_DBG("focus %s: at edge, overflow", dir_str);
+
+    drv->shutdown();
+    return 1;
+}
 
 int main(int argc, char **argv)
 {
@@ -92,9 +122,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "invalid direction: %s\n", dir);
             return 1;
         }
-        /* TODO: sprint 1 — connect to glewd, issue focus command */
-        LOG_INFO("focus %s (not yet implemented)", dir);
-        return 0;
+        return cmd_focus(&cfg, dir);
 
     } else if (strcmp(cmd, "status") == 0) {
         /* TODO: sprint 2 — query glewd for peer status */

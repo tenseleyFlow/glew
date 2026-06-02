@@ -34,3 +34,22 @@ direction_t direction_opposite(direction_t dir)
     }
     return DIR_LEFT;
 }
+
+static const struct {
+    const char *name;
+    const wm_driver_t *drv;
+} driver_table[] = {
+    { "i3",     &i3_driver },
+    { "sway",   &i3_driver },
+    { "gar",    &i3_driver },
+    { "tarmac", &tarmac_driver },
+};
+
+const wm_driver_t *driver_by_name(const char *name)
+{
+    for (size_t i = 0; i < sizeof(driver_table) / sizeof(driver_table[0]); i++) {
+        if (strcmp(driver_table[i].name, name) == 0)
+            return driver_table[i].drv;
+    }
+    return NULL;
+}

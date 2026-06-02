@@ -21,6 +21,8 @@ set(COMMON_SOURCES
     src/log.c
     src/layout.c
     src/drivers/driver.c
+    src/drivers/i3.c
+    src/drivers/tarmac.c
 )
 
 # glew CLI
