@@ -32,6 +32,8 @@ typedef enum {
 static input_mode_t  g_input_mode = MODE_LOCAL;
 static peer_t       *g_input_target;   /* peer we're sending input to */
 static peer_t       *g_input_source;   /* peer sending input to us */
+static int           g_input_ev_sent;
+static int           g_input_ev_recv;
 
 static void on_captured_input(const input_event_t *ev, void *userdata)
 {
@@ -42,7 +44,8 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
         if (g_input_mode == MODE_REMOTE_SENDING && g_input_target) {
             glew_msg_t stop = { .type = MSG_INPUT_STOP };
             peer_send(g_input_target, &stop);
-            LOG_INFO("input: released, sent input_stop to %s", g_input_target->name);
+            LOG_INFO("input: released, sent input_stop to %s (%d events forwarded)",
+                     g_input_target->name, g_input_ev_sent);
         }
         g_input_mode = MODE_LOCAL;
         g_input_target = NULL;
@@ -51,6 +54,8 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
 
     if (g_input_mode != MODE_REMOTE_SENDING || !g_input_target)
         return;
+
+    g_input_ev_sent++;
 
     glew_msg_t msg = { .type = MSG_INPUT };
     msg.input.type = ev->type;
@@ -68,6 +73,7 @@ static void start_sending_input(peer_t *target)
 {
     g_input_mode = MODE_REMOTE_SENDING;
     g_input_target = target;
+    g_input_ev_sent = 0;
 
     glew_msg_t start = { .type = MSG_INPUT_START };
     snprintf(start.input_start.source, sizeof(start.input_start.source),
@@ -215,10 +221,11 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         LOG_INFO("input: receiving from %s", msg->input_start.source);
         g_input_mode = MODE_REMOTE_RECEIVING;
         g_input_source = p;
+        g_input_ev_recv = 0;
         break;
 
     case MSG_INPUT_STOP:
-        LOG_INFO("input: %s stopped sending", p->name);
+        LOG_INFO("input: %s stopped sending (%d events received)", p->name, g_input_ev_recv);
         g_input_mode = MODE_LOCAL;
         g_input_source = NULL;
         break;
@@ -236,6 +243,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
             .scroll_y = msg->input.scroll_y,
             .mods     = msg->input.mods,
         };
+        g_input_ev_recv++;
         input_inject_event(&ev);
         break;
     }

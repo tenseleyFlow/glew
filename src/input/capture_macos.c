@@ -50,8 +50,9 @@ static CGEventRef tap_callback(CGEventTapProxy proxy, CGEventType type,
         if (flags & kCGEventFlagMaskAlternate) ie.mods |= (1 << 3);
         if (flags & kCGEventFlagMaskCommand) ie.mods |= (1 << 6);
 
-        /* Scroll_Lock (keysym 0xff14) releases the grab */
-        if (ie.type == INPUT_KEY_DOWN && ie.keysym == 0xff14) {
+        /* F12 (keysym 0xffc9) or Scroll_Lock (0xff14) releases the grab */
+        if (ie.type == INPUT_KEY_DOWN &&
+            (ie.keysym == 0xffc9 || ie.keysym == 0xff14)) {
             capturing = 0;
             write(pipe_fds[1], "\x01", 1);
             return event;

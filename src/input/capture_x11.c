@@ -11,13 +11,14 @@
 static Display      *dpy;
 static Window        root;
 static int           screen_w, screen_h;
-static uv_poll_t     x_poll;
+static uv_timer_t    poll_timer;
 static uv_timer_t    safety_timer;
 static input_event_cb g_cb;
 static void          *g_userdata;
 static int            grabbing;
 
-#define SAFETY_TIMEOUT_MS 60000
+#define POLL_INTERVAL_MS   2
+#define SAFETY_TIMEOUT_MS  60000
 
 static uint32_t x_mods_to_mask(unsigned int state)
 {
@@ -67,15 +68,16 @@ static void process_x_events(void)
             ie.keysym = XkbKeycodeToKeysym(dpy, ev.xkey.keycode, 0, 0);
             ie.mods = x_mods_to_mask(ev.xkey.state);
 
-            /* Scroll_Lock releases the grab */
-            if (ie.type == INPUT_KEY_DOWN && ie.keysym == XK_Scroll_Lock) {
+            /* F12 or Ctrl+Alt+Escape releases the grab */
+            if (ie.type == INPUT_KEY_DOWN &&
+                (ie.keysym == XK_F12 || ie.keysym == XK_Scroll_Lock)) {
+                LOG_INFO("x11 capture: release key pressed");
                 input_capture_stop();
                 return;
             }
-            /* Ctrl+Alt+Escape: emergency release */
             if (ie.type == INPUT_KEY_DOWN && ie.keysym == XK_Escape &&
                 (ev.xkey.state & ControlMask) && (ev.xkey.state & Mod1Mask)) {
-                LOG_WARN("x11 capture: emergency release (Ctrl+Alt+Escape)");
+                LOG_INFO("x11 capture: emergency release (Ctrl+Alt+Escape)");
                 input_capture_stop();
                 return;
             }
@@ -115,12 +117,10 @@ static void process_x_events(void)
     }
 }
 
-static void on_x_readable(uv_poll_t *handle, int status, int events)
+static void on_poll_timer(uv_timer_t *handle)
 {
     (void)handle;
-    if (status < 0) return;
-    if (events & UV_READABLE)
-        process_x_events();
+    process_x_events();
 }
 
 int input_capture_init(uv_loop_t *loop)
@@ -136,11 +136,9 @@ int input_capture_init(uv_loop_t *loop)
     screen_w = DisplayWidth(dpy, screen);
     screen_h = DisplayHeight(dpy, screen);
 
-    int xfd = ConnectionNumber(dpy);
-    uv_poll_init(loop, &x_poll, xfd);
+    uv_timer_init(loop, &poll_timer);
     uv_timer_init(loop, &safety_timer);
 
-    /* release grab on crash so the user isn't locked out */
     signal(SIGABRT, crash_handler);
     signal(SIGSEGV, crash_handler);
     atexit(force_ungrab);
@@ -176,7 +174,7 @@ void input_capture_start(input_event_cb cb, void *userdata)
     }
 
     grabbing = 1;
-    uv_poll_start(&x_poll, UV_READABLE, on_x_readable);
+    uv_timer_start(&poll_timer, on_poll_timer, POLL_INTERVAL_MS, POLL_INTERVAL_MS);
     uv_timer_start(&safety_timer, on_safety_timeout, SAFETY_TIMEOUT_MS, 0);
 
     LOG_INFO("x11 capture: grab active (Scroll_Lock or Ctrl+Alt+Esc to release, "
@@ -192,7 +190,7 @@ void input_capture_stop(void)
     XFlush(dpy);
 
     grabbing = 0;
-    uv_poll_stop(&x_poll);
+    uv_timer_stop(&poll_timer);
     uv_timer_stop(&safety_timer);
 
     if (g_cb) {
@@ -208,7 +206,7 @@ void input_capture_shutdown(void)
     if (grabbing)
         input_capture_stop();
     if (dpy) {
-        uv_poll_stop(&x_poll);
+        uv_timer_stop(&poll_timer);
         uv_timer_stop(&safety_timer);
         XCloseDisplay(dpy);
         dpy = NULL;
