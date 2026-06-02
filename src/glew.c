@@ -1,6 +1,7 @@
 #include "config.h"
 #include "log.h"
 #include "version.h"
+#include "drivers/driver.h"
 #include "net/proto.h"
 
 #include <errno.h>
@@ -62,8 +63,6 @@ static int connect_daemon(const glew_config_t *cfg)
     snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        LOG_ERR("cannot connect to glewd at %s: %s", path, strerror(errno));
-        LOG_ERR("is glewd running?");
         close(fd);
         return -1;
     }
@@ -116,10 +115,27 @@ static int recv_msg(int fd, glew_msg_t *msg)
     return rc;
 }
 
+static int focus_fallback(const glew_config_t *cfg, const char *dir_str)
+{
+    const wm_driver_t *drv = driver_by_name(cfg->self_wm);
+    if (!drv || drv->init(NULL) != 0)
+        return 1;
+
+    direction_t dir = direction_parse(dir_str);
+    int can = drv->can_focus(dir);
+    if (can)
+        drv->do_focus(dir);
+    drv->shutdown();
+    return 0;
+}
+
 static int cmd_focus(const glew_config_t *cfg, const char *dir_str)
 {
     int fd = connect_daemon(cfg);
-    if (fd < 0) return 1;
+    if (fd < 0) {
+        LOG_DBG("glewd unavailable, falling back to direct WM control");
+        return focus_fallback(cfg, dir_str);
+    }
 
     glew_msg_t req = { .type = MSG_FOCUS };
     snprintf(req.focus.direction, sizeof(req.focus.direction), "%s", dir_str);
