@@ -1,0 +1,11 @@
+build/
+.docs/
+*.o
+*.d
+*.swp
+*.swo
+*~
+.cache/
+compile_commands.json
+.DS_Store
+fac_debug.txt
