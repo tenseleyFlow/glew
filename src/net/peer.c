@@ -295,30 +295,34 @@ static void on_incoming_msg(const glew_msg_t *msg, void *ctx)
             return;
         }
 
-        /* stop any pending reconnect */
+        /* stop any pending reconnect / outbound connect */
         uv_timer_stop(&p->reconnect_timer);
         if (p->state == PEER_CONNECTING || p->state == PEER_HANDSHAKING) {
             if (!uv_is_closing((uv_handle_t *)&p->handle))
                 uv_close((uv_handle_t *)&p->handle, NULL);
         }
 
-        /* take over the incoming connection's fd */
-        uv_fileno((uv_handle_t *)&inc->handle, (uv_os_fd_t *)&p->handle);
-        /* reinit handle on the loop */
-        uv_read_stop((uv_stream_t *)&inc->handle);
+        /* dup the fd so we can close the incoming handle cleanly */
+        uv_os_fd_t orig_fd;
+        uv_fileno((uv_handle_t *)&inc->handle, &orig_fd);
+        int fd2 = dup((int)orig_fd);
+        if (fd2 < 0) {
+            LOG_ERR("peer %s: dup() failed", p->name);
+            uv_close((uv_handle_t *)&inc->handle, on_incoming_close);
+            peer_schedule_reconnect(p);
+            return;
+        }
 
-        /* we can't simply move handles — reinit a new tcp for the peer */
-        int fd;
-        uv_fileno((uv_handle_t *)&inc->handle, &fd);
+        uv_read_stop((uv_stream_t *)&inc->handle);
+        uv_close((uv_handle_t *)&inc->handle, on_incoming_close);
+
+        /* init peer handle with the dup'd fd */
         uv_tcp_init(mgr->loop, &p->handle);
-        uv_tcp_open(&p->handle, fd);
+        uv_tcp_open(&p->handle, fd2);
         p->handle.data = p;
         p->rlen = 0;
         p->state = PEER_CONNECTED;
         p->reconnect_ms = RECONNECT_BASE_MS;
-
-        /* prevent incoming_t close callback from closing the fd */
-        inc->handle.data = NULL;
 
         uv_read_start((uv_stream_t *)&p->handle, alloc_buf, on_peer_read);
 
@@ -327,9 +331,6 @@ static void on_incoming_msg(const glew_msg_t *msg, void *ctx)
         peer_send(p, &ok);
 
         LOG_INFO("peer %s: accepted incoming connection", p->name);
-
-        /* free the incoming struct without closing the fd */
-        free(inc);
         return;
     }
 
