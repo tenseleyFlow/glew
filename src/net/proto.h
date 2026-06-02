@@ -29,6 +29,10 @@ typedef enum {
     MSG_FOCUS_ACK,
     MSG_PING,
     MSG_PONG,
+    /* input forwarding */
+    MSG_INPUT_START,
+    MSG_INPUT_STOP,
+    MSG_INPUT,
     /* local only */
     MSG_FOCUS,
     MSG_FOCUS_RESULT,
@@ -41,6 +45,15 @@ typedef struct {
         struct { char reason[128]; }                        hello_err;
         struct { char from_direction[8]; char source[64]; } focus_enter;
         struct { int success; }                             focus_ack;
+        struct { char source[64]; uint32_t mods; }           input_start;
+        struct {
+            int      type;
+            uint32_t keysym;
+            double   x, y;
+            int      button;
+            int      scroll_x, scroll_y;
+            uint32_t mods;
+        }                                                   input;
         struct { char direction[8]; }                       focus;
         struct { int crossed; char target[64]; }            focus_result;
     };

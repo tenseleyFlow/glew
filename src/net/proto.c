@@ -16,6 +16,9 @@ static const char *type_str(msg_type_t t)
     case MSG_FOCUS_ACK:    return "focus_ack";
     case MSG_PING:         return "ping";
     case MSG_PONG:         return "pong";
+    case MSG_INPUT_START:  return "input_start";
+    case MSG_INPUT_STOP:   return "input_stop";
+    case MSG_INPUT:        return "input";
     case MSG_FOCUS:        return "focus";
     case MSG_FOCUS_RESULT: return "focus_result";
     default:               return "unknown";
@@ -30,6 +33,9 @@ static msg_type_t type_from_str(const char *s)
     if (strcmp(s, "hello_err") == 0)    return MSG_HELLO_ERR;
     if (strcmp(s, "focus_enter") == 0)  return MSG_FOCUS_ENTER;
     if (strcmp(s, "focus_ack") == 0)    return MSG_FOCUS_ACK;
+    if (strcmp(s, "input_start") == 0)  return MSG_INPUT_START;
+    if (strcmp(s, "input_stop") == 0)   return MSG_INPUT_STOP;
+    if (strcmp(s, "input") == 0)        return MSG_INPUT;
     if (strcmp(s, "ping") == 0)         return MSG_PING;
     if (strcmp(s, "pong") == 0)         return MSG_PONG;
     if (strcmp(s, "focus") == 0)        return MSG_FOCUS;
@@ -56,6 +62,22 @@ size_t msg_serialize(const glew_msg_t *msg, char **out)
         break;
     case MSG_FOCUS_ACK:
         cJSON_AddBoolToObject(json, "success", msg->focus_ack.success);
+        break;
+    case MSG_INPUT_START:
+        cJSON_AddStringToObject(json, "source", msg->input_start.source);
+        cJSON_AddNumberToObject(json, "mods", msg->input_start.mods);
+        break;
+    case MSG_INPUT_STOP:
+        break;
+    case MSG_INPUT:
+        cJSON_AddNumberToObject(json, "event", msg->input.type);
+        cJSON_AddNumberToObject(json, "keysym", msg->input.keysym);
+        cJSON_AddNumberToObject(json, "x", msg->input.x);
+        cJSON_AddNumberToObject(json, "y", msg->input.y);
+        cJSON_AddNumberToObject(json, "button", msg->input.button);
+        cJSON_AddNumberToObject(json, "scroll_x", msg->input.scroll_x);
+        cJSON_AddNumberToObject(json, "scroll_y", msg->input.scroll_y);
+        cJSON_AddNumberToObject(json, "mods", msg->input.mods);
         break;
     case MSG_FOCUS:
         cJSON_AddStringToObject(json, "direction", msg->focus.direction);
@@ -125,6 +147,22 @@ int msg_parse(const char *data, size_t len, glew_msg_t *out)
         out->focus_ack.success = (s && cJSON_IsTrue(s)) ? 1 : 0;
         break;
     }
+    case MSG_INPUT_START:
+        copy_json_str(out->input_start.source, sizeof(out->input_start.source), json, "source");
+        out->input_start.mods = (uint32_t)cJSON_GetNumberValue(cJSON_GetObjectItem(json, "mods"));
+        break;
+    case MSG_INPUT_STOP:
+        break;
+    case MSG_INPUT:
+        out->input.type = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(json, "event"));
+        out->input.keysym = (uint32_t)cJSON_GetNumberValue(cJSON_GetObjectItem(json, "keysym"));
+        out->input.x = cJSON_GetNumberValue(cJSON_GetObjectItem(json, "x"));
+        out->input.y = cJSON_GetNumberValue(cJSON_GetObjectItem(json, "y"));
+        out->input.button = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(json, "button"));
+        out->input.scroll_x = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(json, "scroll_x"));
+        out->input.scroll_y = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(json, "scroll_y"));
+        out->input.mods = (uint32_t)cJSON_GetNumberValue(cJSON_GetObjectItem(json, "mods"));
+        break;
     case MSG_FOCUS:
         copy_json_str(out->focus.direction, sizeof(out->focus.direction), json, "direction");
         break;

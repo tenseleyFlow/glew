@@ -5,6 +5,7 @@
 #include "drivers/driver.h"
 #include "net/proto.h"
 #include "net/peer.h"
+#include "input/input.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,12 +14,78 @@
 #include <unistd.h>
 #include <getopt.h>
 
-static glew_config_t  g_cfg;
-static layout_t       g_layout;
+static glew_config_t      g_cfg;
+static layout_t           g_layout;
 static const wm_driver_t *g_driver;
-static peer_mgr_t     g_mgr;
-static uv_loop_t     *g_loop;
-static uv_signal_t    g_sigint, g_sigterm;
+static peer_mgr_t         g_mgr;
+static uv_loop_t         *g_loop;
+static uv_signal_t        g_sigint, g_sigterm;
+
+/* ── Input state machine ───────────────────────────────────────── */
+
+typedef enum {
+    MODE_LOCAL,
+    MODE_REMOTE_SENDING,    /* we captured input, forwarding to a peer */
+    MODE_REMOTE_RECEIVING,  /* a peer is sending input to us */
+} input_mode_t;
+
+static input_mode_t  g_input_mode = MODE_LOCAL;
+static peer_t       *g_input_target;   /* peer we're sending input to */
+static peer_t       *g_input_source;   /* peer sending input to us */
+
+static void on_captured_input(const input_event_t *ev, void *userdata)
+{
+    (void)userdata;
+
+    /* type == -1 is the synthetic "capture stopped" signal */
+    if ((int)ev->type == -1) {
+        if (g_input_mode == MODE_REMOTE_SENDING && g_input_target) {
+            glew_msg_t stop = { .type = MSG_INPUT_STOP };
+            peer_send(g_input_target, &stop);
+            LOG_INFO("input: released, sent input_stop to %s", g_input_target->name);
+        }
+        g_input_mode = MODE_LOCAL;
+        g_input_target = NULL;
+        return;
+    }
+
+    if (g_input_mode != MODE_REMOTE_SENDING || !g_input_target)
+        return;
+
+    glew_msg_t msg = { .type = MSG_INPUT };
+    msg.input.type = ev->type;
+    msg.input.keysym = ev->keysym;
+    msg.input.x = ev->x;
+    msg.input.y = ev->y;
+    msg.input.button = ev->button;
+    msg.input.scroll_x = ev->scroll_x;
+    msg.input.scroll_y = ev->scroll_y;
+    msg.input.mods = ev->mods;
+    peer_send(g_input_target, &msg);
+}
+
+static void start_sending_input(peer_t *target)
+{
+    g_input_mode = MODE_REMOTE_SENDING;
+    g_input_target = target;
+
+    glew_msg_t start = { .type = MSG_INPUT_START };
+    snprintf(start.input_start.source, sizeof(start.input_start.source),
+             "%s", g_cfg.self_name);
+    start.input_start.mods = 0;
+    peer_send(target, &start);
+
+    input_capture_start(on_captured_input, NULL);
+    LOG_INFO("input: capturing and forwarding to %s", target->name);
+}
+
+static void stop_sending_input(void)
+{
+    input_capture_stop();
+    /* the capture_stop callback sends input_stop and resets state */
+}
+
+/* ── Focus handling ─────────────────────────────────────────────── */
 
 static void usage(void)
 {
@@ -40,8 +107,6 @@ static const struct option longopts[] = {
     { "help",    no_argument,       NULL, 'h' },
     { NULL, 0, NULL, 0 },
 };
-
-/* ── Focus handling ─────────────────────────────────────────────── */
 
 static void handle_focus(const char *dir_str, uv_stream_t *client)
 {
@@ -84,12 +149,16 @@ static void handle_focus(const char *dir_str, uv_stream_t *client)
     LOG_INFO("focus %s: crossing to %s (entering from %s)",
              dir_str, p->name, direction_str(enter_dir));
 
+    /* send focus_enter */
     glew_msg_t fe = { .type = MSG_FOCUS_ENTER };
     snprintf(fe.focus_enter.from_direction, sizeof(fe.focus_enter.from_direction),
              "%s", direction_str(enter_dir));
     snprintf(fe.focus_enter.source, sizeof(fe.focus_enter.source),
              "%s", g_cfg.self_name);
     peer_send(p, &fe);
+
+    /* start capturing and forwarding input */
+    start_sending_input(p);
 
     glew_msg_t reply = { .type = MSG_FOCUS_RESULT };
     reply.focus_result.crossed = 1;
@@ -141,6 +210,35 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         LOG_DBG("peer %s: focus_ack success=%d", p->name, msg->focus_ack.success);
         break;
 
+    case MSG_INPUT_START:
+        LOG_INFO("input: receiving from %s", msg->input_start.source);
+        g_input_mode = MODE_REMOTE_RECEIVING;
+        g_input_source = p;
+        break;
+
+    case MSG_INPUT_STOP:
+        LOG_INFO("input: %s stopped sending", p->name);
+        g_input_mode = MODE_LOCAL;
+        g_input_source = NULL;
+        break;
+
+    case MSG_INPUT: {
+        if (g_input_mode != MODE_REMOTE_RECEIVING) break;
+
+        input_event_t ev = {
+            .type     = msg->input.type,
+            .keysym   = msg->input.keysym,
+            .x        = msg->input.x,
+            .y        = msg->input.y,
+            .button   = msg->input.button,
+            .scroll_x = msg->input.scroll_x,
+            .scroll_y = msg->input.scroll_y,
+            .mods     = msg->input.mods,
+        };
+        input_inject_event(&ev);
+        break;
+    }
+
     case MSG_PING: {
         glew_msg_t pong = { .type = MSG_PONG };
         peer_send(p, &pong);
@@ -162,6 +260,12 @@ static void on_signal(uv_signal_t *handle, int signum)
 {
     (void)signum;
     LOG_INFO("signal received, shutting down");
+
+    if (g_input_mode == MODE_REMOTE_SENDING)
+        stop_sending_input();
+
+    input_capture_shutdown();
+    input_inject_shutdown();
     peer_mgr_stop(&g_mgr);
     uv_signal_stop(&g_sigint);
     uv_signal_stop(&g_sigterm);
@@ -222,6 +326,13 @@ int main(int argc, char **argv)
 
     g_loop = uv_default_loop();
 
+    /* init input subsystems */
+    if (input_capture_init(g_loop) != 0)
+        LOG_WARN("input capture init failed (capture will be unavailable)");
+
+    if (input_inject_init() != 0)
+        LOG_WARN("input inject init failed (injection will be unavailable)");
+
     if (peer_mgr_init(&g_mgr, g_loop, &g_cfg) != 0) {
         LOG_ERR("peer manager init failed");
         return 1;
@@ -230,7 +341,6 @@ int main(int argc, char **argv)
     g_mgr.on_local_message = on_local_message;
     g_mgr.on_peer_message = on_peer_message;
 
-    /* set the peer message callback on each peer */
     for (int i = 0; i < g_mgr.peer_count; i++)
         g_mgr.peers[i].on_message = on_peer_message;
 
