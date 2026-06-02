@@ -34,6 +34,45 @@ static peer_t       *g_input_target;   /* peer we're sending input to */
 static peer_t       *g_input_source;   /* peer sending input to us */
 static int           g_input_ev_sent;
 static int           g_input_ev_recv;
+static int           g_remote_mod_held; /* track mod key state during receiving */
+
+/* keysyms for the WM mod key — determined per WM type */
+static uint32_t g_mod_keysyms[4];
+static int      g_mod_keysym_count;
+
+static void init_mod_keysyms(void)
+{
+    const char *wm = g_cfg.self_wm;
+    if (strcmp(wm, "tarmac") == 0 || strcmp(wm, "gar") == 0) {
+        /* tarmac/gar use Alt/Option as mod */
+        g_mod_keysyms[0] = 0xffe9; /* Alt_L */
+        g_mod_keysyms[1] = 0xffea; /* Alt_R */
+        g_mod_keysym_count = 2;
+    } else {
+        /* i3/sway use Super as mod */
+        g_mod_keysyms[0] = 0xffeb; /* Super_L */
+        g_mod_keysyms[1] = 0xffec; /* Super_R */
+        g_mod_keysym_count = 2;
+    }
+}
+
+static int is_mod_keysym(uint32_t keysym)
+{
+    for (int i = 0; i < g_mod_keysym_count; i++)
+        if (g_mod_keysyms[i] == keysym) return 1;
+    return 0;
+}
+
+static direction_t arrow_keysym_to_dir(uint32_t keysym)
+{
+    switch (keysym) {
+    case 0xff51: return DIR_LEFT;
+    case 0xff52: return DIR_UP;
+    case 0xff53: return DIR_RIGHT;
+    case 0xff54: return DIR_DOWN;
+    default:     return -1;
+    }
+}
 
 static void on_captured_input(const input_event_t *ev, void *userdata)
 {
@@ -226,6 +265,17 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
 
     case MSG_FOCUS_ENTER: {
         direction_t from = direction_parse(msg->focus_enter.from_direction);
+
+        if (g_input_mode == MODE_REMOTE_SENDING) {
+            /* focus returning from remote — release grab, refocus locally */
+            LOG_INFO("focus returning from %s (entering from %s)",
+                     msg->focus_enter.source, msg->focus_enter.from_direction);
+            input_capture_stop(); /* releases grab, triggers on_captured_input(-1) */
+            g_driver->focus_edge(from);
+            break;
+        }
+
+        /* normal incoming focus */
         LOG_INFO("focus entering from %s (source: %s)",
                  msg->focus_enter.from_direction, msg->focus_enter.source);
 
@@ -268,10 +318,62 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
             .mods     = msg->input.mods,
         };
         g_input_ev_recv++;
+
         if (ev.type == INPUT_KEY_DOWN)
             LOG_DBG("inject: KEY_DN keysym=0x%x mods=0x%x", ev.keysym, ev.mods);
         else if (ev.type == INPUT_KEY_UP)
             LOG_DBG("inject: KEY_UP keysym=0x%x", ev.keysym);
+
+        /* track mod key state */
+        if (is_mod_keysym(ev.keysym)) {
+            if (ev.type == INPUT_KEY_DOWN)
+                g_remote_mod_held = 1;
+            else if (ev.type == INPUT_KEY_UP)
+                g_remote_mod_held = 0;
+            input_inject_event(&ev);
+            break;
+        }
+
+        /* intercept mod+direction: route through WM driver */
+        if (g_remote_mod_held && ev.type == INPUT_KEY_DOWN) {
+            direction_t dir = arrow_keysym_to_dir(ev.keysym);
+            if ((int)dir >= 0) {
+                int can = g_driver->can_focus(dir);
+                if (can) {
+                    g_driver->do_focus(dir);
+                    LOG_DBG("remote focus %s: moved within %s",
+                            direction_str(dir), g_driver->name);
+                } else {
+                    /* at the edge — try cross back to sender */
+                    int target_idx;
+                    direction_t enter_dir;
+                    if (layout_resolve(&g_layout, dir, &target_idx, &enter_dir) == 0) {
+                        peer_t *target = peer_by_index(&g_mgr, target_idx);
+                        if (target && target->state == PEER_CONNECTED) {
+                            LOG_INFO("focus %s: crossing back to %s",
+                                     direction_str(dir), target->name);
+
+                            glew_msg_t fe = { .type = MSG_FOCUS_ENTER };
+                            snprintf(fe.focus_enter.from_direction,
+                                     sizeof(fe.focus_enter.from_direction),
+                                     "%s", direction_str(enter_dir));
+                            snprintf(fe.focus_enter.source,
+                                     sizeof(fe.focus_enter.source),
+                                     "%s", g_cfg.self_name);
+                            peer_send(target, &fe);
+
+                            g_input_mode = MODE_LOCAL;
+                            g_input_source = NULL;
+                            g_remote_mod_held = 0;
+                        }
+                    } else {
+                        LOG_DBG("remote focus %s: at absolute edge", direction_str(dir));
+                    }
+                }
+                break; /* don't inject mod+direction */
+            }
+        }
+
         input_inject_event(&ev);
         break;
     }
@@ -360,6 +462,8 @@ int main(int argc, char **argv)
 
     if (g_driver->init(NULL) != 0)
         return 1;
+
+    init_mod_keysyms();
 
     g_loop = uv_default_loop();
 
