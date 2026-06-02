@@ -33,9 +33,13 @@ void input_inject_event(const input_event_t *ev)
     case INPUT_KEY_DOWN:
     case INPUT_KEY_UP: {
         CGKeyCode kc = keysym_to_macos_keycode(ev->keysym);
-        if (kc == 0xFFFF) break;
+        if (kc == 0xFFFF) {
+            LOG_DBG("inject: unknown keysym 0x%x, skipping", ev->keysym);
+            break;
+        }
         CGEventRef e = CGEventCreateKeyboardEvent(NULL, kc, ev->type == INPUT_KEY_DOWN);
-        CGEventPost(kCGHIDEventTap, e);
+        /* post at session level to bypass system shortcuts (Dictation, etc.) */
+        CGEventPost(kCGSessionEventTap, e);
         CFRelease(e);
         break;
     }
