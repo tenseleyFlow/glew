@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Warnings
-add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
+add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-format-truncation)
 
 # Embedded deps
 add_library(cjson STATIC deps/cJSON.c)
