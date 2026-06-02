@@ -20,6 +20,8 @@ static void          *g_userdata;
 static int            grabbing;
 static int            grab_retries;
 static uv_timer_t    edge_timer;
+static int            center_x, center_y;
+static int            skip_warp_event;
 
 #define POLL_INTERVAL_MS   2
 #define SAFETY_TIMEOUT_MS  60000
@@ -88,10 +90,20 @@ static void process_x_events(void)
             break;
         }
         case MotionNotify:
+            /* skip the synthetic event from our own warp */
+            if (skip_warp_event) {
+                skip_warp_event = 0;
+                continue;
+            }
             ie.type = INPUT_MOTION;
-            ie.x = (double)ev.xmotion.x_root / screen_w;
-            ie.y = (double)ev.xmotion.y_root / screen_h;
+            /* delta from screen center, normalized */
+            ie.x = (double)(ev.xmotion.x_root - center_x) / screen_w;
+            ie.y = (double)(ev.xmotion.y_root - center_y) / screen_h;
             ie.mods = x_mods_to_mask(ev.xmotion.state);
+            /* warp cursor back to center */
+            skip_warp_event = 1;
+            XWarpPointer(dpy, None, root, 0, 0, 0, 0, center_x, center_y);
+            XFlush(dpy);
             break;
         case ButtonPress:
         case ButtonRelease:
@@ -108,8 +120,8 @@ static void process_x_events(void)
                 ie.type = (ev.type == ButtonPress) ? INPUT_BUTTON_DOWN : INPUT_BUTTON_UP;
                 ie.button = ev.xbutton.button;
             }
-            ie.x = (double)ev.xbutton.x_root / screen_w;
-            ie.y = (double)ev.xbutton.y_root / screen_h;
+            ie.x = 0;
+            ie.y = 0;
             ie.mods = x_mods_to_mask(ev.xbutton.state);
             break;
         default:
@@ -145,6 +157,9 @@ int input_capture_init(uv_loop_t *loop)
     XColor black = {0};
     blank_cursor = XCreatePixmapCursor(dpy, pm, pm, &black, &black, 0, 0);
     XFreePixmap(dpy, pm);
+
+    center_x = screen_w / 2;
+    center_y = screen_h / 2;
 
     uv_timer_init(loop, &poll_timer);
     uv_timer_init(loop, &safety_timer);
@@ -182,6 +197,10 @@ static int try_grab(void)
     }
 
     grabbing = 1;
+    skip_warp_event = 1;
+    XWarpPointer(dpy, None, root, 0, 0, 0, 0, center_x, center_y);
+    XFlush(dpy);
+
     uv_timer_start(&poll_timer, on_poll_timer, POLL_INTERVAL_MS, POLL_INTERVAL_MS);
     uv_timer_start(&safety_timer, on_safety_timeout, SAFETY_TIMEOUT_MS, 0);
 
