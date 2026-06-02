@@ -10,6 +10,7 @@
 
 static int screen_w, screen_h;
 static int trusted;
+static CGEventSourceRef event_source;
 
 int input_inject_init(void)
 {
@@ -22,6 +23,12 @@ int input_inject_init(void)
     CGDirectDisplayID main_display = CGMainDisplayID();
     screen_w = (int)CGDisplayPixelsWide(main_display);
     screen_h = (int)CGDisplayPixelsHigh(main_display);
+
+    event_source = CGEventSourceCreate(kCGEventSourceStatePrivate);
+    if (!event_source) {
+        LOG_ERR("macOS inject: failed to create event source");
+        return -1;
+    }
 
     LOG_INFO("macOS inject: initialized (%dx%d, trusted=%d)", screen_w, screen_h, trusted);
     return trusted ? 0 : -1;
@@ -37,8 +44,12 @@ void input_inject_event(const input_event_t *ev)
             LOG_DBG("inject: unknown keysym 0x%x, skipping", ev->keysym);
             break;
         }
-        CGEventRef e = CGEventCreateKeyboardEvent(NULL, kc, ev->type == INPUT_KEY_DOWN);
-        /* post at session level to bypass system shortcuts (Dictation, etc.) */
+        CGEventRef e = CGEventCreateKeyboardEvent(event_source, kc, ev->type == INPUT_KEY_DOWN);
+        /* set unicode character for printable ASCII keys */
+        if (ev->keysym >= 0x20 && ev->keysym <= 0x7e) {
+            UniChar ch = (UniChar)ev->keysym;
+            CGEventKeyboardSetUnicodeString(e, 1, &ch);
+        }
         CGEventPost(kCGSessionEventTap, e);
         CFRelease(e);
         break;
@@ -46,7 +57,7 @@ void input_inject_event(const input_event_t *ev)
     case INPUT_MOTION: {
         CGFloat x = ev->x * screen_w;
         CGFloat y = ev->y * screen_h;
-        CGEventRef e = CGEventCreateMouseEvent(NULL, kCGEventMouseMoved,
+        CGEventRef e = CGEventCreateMouseEvent(event_source, kCGEventMouseMoved,
                                                CGPointMake(x, y), kCGMouseButtonLeft);
         CGEventPost(kCGHIDEventTap, e);
         CFRelease(e);
@@ -70,13 +81,13 @@ void input_inject_event(const input_event_t *ev)
             btn = (CGMouseButton)(ev->button - 1);
         }
 
-        CGEventRef e = CGEventCreateMouseEvent(NULL, etype, CGPointMake(x, y), btn);
+        CGEventRef e = CGEventCreateMouseEvent(event_source, etype, CGPointMake(x, y), btn);
         CGEventPost(kCGHIDEventTap, e);
         CFRelease(e);
         break;
     }
     case INPUT_SCROLL: {
-        CGEventRef e = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitLine, 2,
+        CGEventRef e = CGEventCreateScrollWheelEvent(event_source, kCGScrollEventUnitLine, 2,
                                                       ev->scroll_y, ev->scroll_x);
         CGEventPost(kCGHIDEventTap, e);
         CFRelease(e);
@@ -87,7 +98,10 @@ void input_inject_event(const input_event_t *ev)
 
 void input_inject_shutdown(void)
 {
-    /* nothing to clean up */
+    if (event_source) {
+        CFRelease(event_source);
+        event_source = NULL;
+    }
 }
 
 #endif /* __APPLE__ */
