@@ -81,7 +81,7 @@ static direction_t arrow_keysym_to_dir(uint32_t keysym)
 }
 
 static void start_edge_watching(void);
-static void start_sending_input(peer_t *target);
+static void start_sending_input(peer_t *target, direction_t cross_dir);
 
 static void on_mouse_edge(int dir, void *userdata)
 {
@@ -104,10 +104,11 @@ static void on_mouse_edge(int dir, void *userdata)
              "%s", direction_str(enter_dir));
     snprintf(fe.focus_enter.source, sizeof(fe.focus_enter.source),
              "%s", g_cfg.self_name);
+    fe.focus_enter.cursor_y = input_get_cursor_y();
     peer_send(p, &fe);
 
     input_edge_watch_stop();
-    start_sending_input(p);
+    start_sending_input(p, d);
 }
 
 static void start_edge_watching(void)
@@ -177,7 +178,7 @@ static void flush_modifiers(peer_t *target)
     }
 }
 
-static void start_sending_input(peer_t *target)
+static void start_sending_input(peer_t *target, direction_t cross_dir)
 {
     g_input_mode = MODE_REMOTE_SENDING;
     g_input_target = target;
@@ -191,7 +192,8 @@ static void start_sending_input(peer_t *target)
 
     flush_modifiers(target);
 
-    input_capture_start(on_captured_input, NULL);
+    int edge_dir = (cross_dir == DIR_LEFT) ? 0 : (cross_dir == DIR_RIGHT) ? 1 : -1;
+    input_capture_start(on_captured_input, NULL, edge_dir);
     LOG_INFO("input: capturing and forwarding to %s", target->name);
 }
 
@@ -271,11 +273,12 @@ static void handle_focus(const char *dir_str, uv_stream_t *client)
              "%s", direction_str(enter_dir));
     snprintf(fe.focus_enter.source, sizeof(fe.focus_enter.source),
              "%s", g_cfg.self_name);
+    fe.focus_enter.cursor_y = input_get_cursor_y();
     peer_send(p, &fe);
 
     /* start capturing and forwarding input (skip if already capturing to this peer) */
     if (g_input_mode != MODE_REMOTE_SENDING || g_input_target != p)
-        start_sending_input(p);
+        start_sending_input(p, dir);
 
     glew_msg_t reply = { .type = MSG_FOCUS_RESULT };
     reply.focus_result.crossed = 1;
@@ -326,9 +329,11 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         LOG_INFO("focus entering from %s (source: %s)",
                  msg->focus_enter.from_direction, msg->focus_enter.source);
 
-        if (from == DIR_LEFT)       { g_virt_x = 0.0;  g_virt_y = 0.5; }
-        else if (from == DIR_RIGHT) { g_virt_x = 1.0;  g_virt_y = 0.5; }
-        else                        { g_virt_x = 0.5;  g_virt_y = 0.5; }
+        double cy = msg->focus_enter.cursor_y;
+        if (cy < 0.0 || cy > 1.0) cy = 0.5;
+        if (from == DIR_LEFT)       { g_virt_x = 0.0;  g_virt_y = cy; }
+        else if (from == DIR_RIGHT) { g_virt_x = 1.0;  g_virt_y = cy; }
+        else                        { g_virt_x = 0.5;  g_virt_y = cy; }
 
         int rc = g_driver->focus_edge(from);
 
@@ -412,6 +417,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                             snprintf(fe.focus_enter.source,
                                      sizeof(fe.focus_enter.source),
                                      "%s", g_cfg.self_name);
+                            fe.focus_enter.cursor_y = g_virt_y;
                             peer_send(target, &fe);
 
                             g_input_mode = MODE_LOCAL;
@@ -461,6 +467,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                         snprintf(fe.focus_enter.source,
                                  sizeof(fe.focus_enter.source),
                                  "%s", g_cfg.self_name);
+                        fe.focus_enter.cursor_y = g_virt_y;
                         peer_send(target, &fe);
 
                         g_input_mode = MODE_LOCAL;

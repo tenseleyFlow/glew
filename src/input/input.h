@@ -27,9 +27,13 @@ typedef void (*input_event_cb)(const input_event_t *ev, void *userdata);
 /* ── Capture (grabs input, forwards to callback) ────────────────── */
 
 int  input_capture_init(uv_loop_t *loop);
-void input_capture_start(input_event_cb cb, void *userdata);
+void input_capture_start(input_event_cb cb, void *userdata, int crossing_dir);
 void input_capture_stop(void);
 void input_capture_shutdown(void);
+
+/* ── Cursor query ───────────────────────────────────────────────── */
+
+double input_get_cursor_y(void);
 
 /* ── Injection (receives events, injects locally) ───────────────── */
 

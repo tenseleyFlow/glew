@@ -185,8 +185,9 @@ int input_capture_init(uv_loop_t *loop)
     return 0;
 }
 
-void input_capture_start(input_event_cb cb, void *userdata)
+void input_capture_start(input_event_cb cb, void *userdata, int crossing_dir)
 {
+    (void)crossing_dir;
     if (capturing) return;
     g_cb = cb;
     g_userdata = userdata;
@@ -229,6 +230,14 @@ void input_capture_shutdown(void)
 
     close(pipe_fds[0]);
     close(pipe_fds[1]);
+}
+
+double input_get_cursor_y(void)
+{
+    CGEventRef event = CGEventCreate(NULL);
+    CGPoint loc = CGEventGetLocation(event);
+    CFRelease(event);
+    return (double)loc.y / screen_h;
 }
 
 /* ── Edge watching (stub — macOS uses the receiving-side edge check) ── */

@@ -21,7 +21,9 @@ static void          *g_userdata;
 static int            grabbing;
 static int            grab_retries;
 static int            center_x, center_y;
-static int            saved_x, saved_y;
+static int            saved_left_x, saved_left_y;
+static int            saved_right_x, saved_right_y;
+static int            active_edge;  /* 0=left, 1=right, -1=unknown */
 
 #define POLL_INTERVAL_MS       2
 #define SAFETY_TIMEOUT_MS      60000
@@ -174,6 +176,9 @@ int input_capture_init(uv_loop_t *loop)
 
     center_x = screen_w / 2;
     center_y = screen_h / 2;
+    saved_left_x = saved_right_x = center_x;
+    saved_left_y = saved_right_y = center_y;
+    active_edge = -1;
 
     uv_timer_init(loop, &poll_timer);
     uv_timer_init(loop, &safety_timer);
@@ -210,10 +215,13 @@ static int try_grab(void)
 
     grabbing = 1;
 
+    /* save cursor position into the active edge slot */
     Window rr, cr;
-    int wx, wy;
+    int cur_x, cur_y, wx, wy;
     unsigned int mask;
-    XQueryPointer(dpy, root, &rr, &cr, &saved_x, &saved_y, &wx, &wy, &mask);
+    XQueryPointer(dpy, root, &rr, &cr, &cur_x, &cur_y, &wx, &wy, &mask);
+    if (active_edge == 0)      { saved_left_x = cur_x;  saved_left_y = cur_y; }
+    else if (active_edge == 1) { saved_right_x = cur_x; saved_right_y = cur_y; }
 
     XWarpPointer(dpy, None, root, 0, 0, 0, 0, center_x, center_y);
     XFlush(dpy);
@@ -249,13 +257,14 @@ static void on_grab_retry(uv_timer_t *timer)
     uv_timer_start(&grab_retry_timer, on_grab_retry, GRAB_RETRY_MS, 0);
 }
 
-void input_capture_start(input_event_cb cb, void *userdata)
+void input_capture_start(input_event_cb cb, void *userdata, int crossing_dir)
 {
     if (grabbing) return;
 
     g_cb = cb;
     g_userdata = userdata;
     grab_retries = 0;
+    active_edge = crossing_dir;
 
     int rc = try_grab();
     if (rc == GrabSuccess)
@@ -271,10 +280,17 @@ void input_capture_stop(void)
 
     XUngrabKeyboard(dpy, CurrentTime);
     XUngrabPointer(dpy, CurrentTime);
-    XWarpPointer(dpy, None, root, 0, 0, 0, 0, saved_x, saved_y);
+    /* restore cursor from the active edge slot */
+    int rx, ry;
+    if (active_edge == 0)      { rx = saved_left_x;  ry = saved_left_y; }
+    else if (active_edge == 1) { rx = saved_right_x; ry = saved_right_y; }
+    else                       { rx = center_x;      ry = center_y; }
+
+    XWarpPointer(dpy, None, root, 0, 0, 0, 0, rx, ry);
     XFlush(dpy);
 
     grabbing = 0;
+    active_edge = -1;
     uv_timer_stop(&poll_timer);
     uv_timer_stop(&safety_timer);
     uv_timer_stop(&grab_retry_timer);
@@ -284,7 +300,18 @@ void input_capture_stop(void)
         g_cb(&stop, g_userdata);
     }
 
-    LOG_INFO("x11 capture: grab released (cursor restored to %d,%d)", saved_x, saved_y);
+    LOG_INFO("x11 capture: grab released (cursor restored to %d,%d)", rx, ry);
+}
+
+double input_get_cursor_y(void)
+{
+    if (!dpy) return 0.5;
+    Window rr, cr;
+    int rx, ry, wx, wy;
+    unsigned int mask;
+    if (!XQueryPointer(dpy, root, &rr, &cr, &rx, &ry, &wx, &wy, &mask))
+        return 0.5;
+    return (double)ry / screen_h;
 }
 
 /* ── Edge watching with two-tap + switch delay ──────────────────── */

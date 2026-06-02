@@ -59,6 +59,7 @@ size_t msg_serialize(const glew_msg_t *msg, char **out)
     case MSG_FOCUS_ENTER:
         cJSON_AddStringToObject(json, "from_direction", msg->focus_enter.from_direction);
         cJSON_AddStringToObject(json, "source", msg->focus_enter.source);
+        cJSON_AddNumberToObject(json, "cursor_y", msg->focus_enter.cursor_y);
         break;
     case MSG_FOCUS_ACK:
         cJSON_AddBoolToObject(json, "success", msg->focus_ack.success);
@@ -141,6 +142,10 @@ int msg_parse(const char *data, size_t len, glew_msg_t *out)
     case MSG_FOCUS_ENTER:
         copy_json_str(out->focus_enter.from_direction, sizeof(out->focus_enter.from_direction), json, "from_direction");
         copy_json_str(out->focus_enter.source, sizeof(out->focus_enter.source), json, "source");
+        {
+            cJSON *cy = cJSON_GetObjectItem(json, "cursor_y");
+            out->focus_enter.cursor_y = (cy && cJSON_IsNumber(cy)) ? cJSON_GetNumberValue(cy) : 0.5;
+        }
         break;
     case MSG_FOCUS_ACK: {
         cJSON *s = cJSON_GetObjectItem(json, "success");

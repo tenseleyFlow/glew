@@ -43,7 +43,7 @@ typedef struct {
     union {
         struct { char name[64]; char secret[256]; }         hello;
         struct { char reason[128]; }                        hello_err;
-        struct { char from_direction[8]; char source[64]; } focus_enter;
+        struct { char from_direction[8]; char source[64]; double cursor_y; } focus_enter;
         struct { int success; }                             focus_ack;
         struct { char source[64]; uint32_t mods; }           input_start;
         struct {
