@@ -15,19 +15,23 @@ static Cursor        blank_cursor;
 static uv_timer_t    poll_timer;
 static uv_timer_t    safety_timer;
 static uv_timer_t    grab_retry_timer;
+static uv_timer_t    edge_timer;
 static input_event_cb g_cb;
 static void          *g_userdata;
 static int            grabbing;
 static int            grab_retries;
-static uv_timer_t    edge_timer;
 static int            center_x, center_y;
 static int            saved_x, saved_y;
 
-#define POLL_INTERVAL_MS   2
-#define SAFETY_TIMEOUT_MS  60000
-#define EDGE_POLL_MS       50
-#define EDGE_ZONE_PX       2
-#define EDGE_REARM_PX      100
+#define POLL_INTERVAL_MS       2
+#define SAFETY_TIMEOUT_MS      60000
+#define GRAB_RETRY_MS          50
+#define GRAB_MAX_RETRIES       10
+#define EDGE_POLL_MS           16
+#define EDGE_ZONE_PX           2
+#define EDGE_REARM_PX          100
+#define TWO_TAP_WINDOW_MS      300
+#define SWITCH_DELAY_MS        100
 
 static uint32_t x_mods_to_mask(unsigned int state)
 {
@@ -61,6 +65,8 @@ static void on_safety_timeout(uv_timer_t *timer)
     LOG_WARN("x11 capture: safety timeout reached, releasing grab");
     input_capture_stop();
 }
+
+/* ── Keyboard/button processing ─────────────────────────────────── */
 
 static void process_x_keys(void)
 {
@@ -115,15 +121,15 @@ static void process_x_keys(void)
     }
 }
 
+/* ── Grab poll (mouse via XQueryPointer + keyboard via X events) ── */
+
 static void on_poll_timer(uv_timer_t *handle)
 {
     (void)handle;
 
-    /* keyboard and buttons via X events */
     process_x_keys();
     if (!grabbing) return;
 
-    /* mouse via XQueryPointer (core MotionNotify unreliable on modern X) */
     Window rr, cr;
     int rx, ry, wx, wy;
     unsigned int mask;
@@ -146,6 +152,8 @@ static void on_poll_timer(uv_timer_t *handle)
         g_cb(&ie, g_userdata);
 }
 
+/* ── Grab lifecycle ─────────────────────────────────────────────── */
+
 int input_capture_init(uv_loop_t *loop)
 {
     dpy = XOpenDisplay(NULL);
@@ -159,7 +167,6 @@ int input_capture_init(uv_loop_t *loop)
     screen_w = DisplayWidth(dpy, screen);
     screen_h = DisplayHeight(dpy, screen);
 
-    /* create an invisible cursor for hiding during grab */
     Pixmap pm = XCreatePixmap(dpy, root, 1, 1, 1);
     XColor black = {0};
     blank_cursor = XCreatePixmapCursor(dpy, pm, pm, &black, &black, 0, 0);
@@ -177,12 +184,10 @@ int input_capture_init(uv_loop_t *loop)
     signal(SIGSEGV, crash_handler);
     atexit(force_ungrab);
 
-    LOG_INFO("x11 capture: initialized (%dx%d)", screen_w, screen_h);
+    LOG_INFO("x11 capture: initialized (%dx%d, center=%d,%d)",
+             screen_w, screen_h, center_x, center_y);
     return 0;
 }
-
-#define GRAB_RETRY_MS      50
-#define GRAB_MAX_RETRIES   10
 
 static int try_grab(void)
 {
@@ -205,7 +210,6 @@ static int try_grab(void)
 
     grabbing = 1;
 
-    /* save cursor position so we can restore it on release */
     Window rr, cr;
     int wx, wy;
     unsigned int mask;
@@ -267,17 +271,7 @@ void input_capture_stop(void)
 
     XUngrabKeyboard(dpy, CurrentTime);
     XUngrabPointer(dpy, CurrentTime);
-
-    /* restore cursor near saved position but offset away from screen edges
-     * to prevent immediate re-trigger by the edge watcher */
-    int restore_x = saved_x;
-    int restore_y = saved_y;
-    if (restore_x <= EDGE_ZONE_PX + 50)
-        restore_x = 50;
-    if (restore_x >= screen_w - 1 - EDGE_ZONE_PX - 50)
-        restore_x = screen_w - 50;
-
-    XWarpPointer(dpy, None, root, 0, 0, 0, 0, restore_x, restore_y);
+    XWarpPointer(dpy, None, root, 0, 0, 0, 0, saved_x, saved_y);
     XFlush(dpy);
 
     grabbing = 0;
@@ -290,60 +284,148 @@ void input_capture_stop(void)
         g_cb(&stop, g_userdata);
     }
 
-    LOG_INFO("x11 capture: grab released");
+    LOG_INFO("x11 capture: grab released (cursor restored to %d,%d)", saved_x, saved_y);
 }
 
-/* ── Edge watching ───────────────────────────────────────────────── */
+/* ── Edge watching with two-tap + switch delay ──────────────────── */
 
 static edge_cb_t   g_edge_cb;
 static void        *g_edge_ud;
-static int          edge_triggered;
-static uint64_t     edge_start_time;
+
+/* two-tap state */
+static int          tap_edge_dir;    /* which edge: 0=left, 1=right, -1=none */
+static uint64_t     tap_first_time;  /* when first tap happened */
+static int          tap_prev_x;      /* previous x for delta direction check */
+static int          tap_count;
+
+/* switch delay state */
+static uv_timer_t   switch_delay_timer;
+static int           switch_pending_dir;
+
+static void on_switch_delay(uv_timer_t *timer)
+{
+    (void)timer;
+
+    /* verify cursor is still at the edge */
+    Window rr, cr;
+    int rx, ry, wx, wy;
+    unsigned int mask;
+    if (!XQueryPointer(dpy, root, &rr, &cr, &rx, &ry, &wx, &wy, &mask))
+        return;
+
+    int still_at_edge = 0;
+    if (switch_pending_dir == 0 && rx <= EDGE_ZONE_PX)
+        still_at_edge = 1;
+    if (switch_pending_dir == 1 && rx >= screen_w - 1 - EDGE_ZONE_PX)
+        still_at_edge = 1;
+
+    if (!still_at_edge) {
+        LOG_DBG("edge: switch cancelled (cursor left edge during delay)");
+        switch_pending_dir = -1;
+        return;
+    }
+
+    LOG_INFO("edge: two-tap confirmed, crossing %s",
+             switch_pending_dir == 0 ? "left" : "right");
+
+    if (g_edge_cb)
+        g_edge_cb(switch_pending_dir, g_edge_ud);
+
+    switch_pending_dir = -1;
+}
 
 static void on_edge_poll(uv_timer_t *timer)
 {
     (void)timer;
     if (!dpy) return;
 
-    Window root_ret, child_ret;
+    Window rr, cr;
     int rx, ry, wx, wy;
     unsigned int mask;
-    if (!XQueryPointer(dpy, root, &root_ret, &child_ret, &rx, &ry, &wx, &wy, &mask))
+    if (!XQueryPointer(dpy, root, &rr, &cr, &rx, &ry, &wx, &wy, &mask))
         return;
+
+    uint64_t now = uv_now(edge_timer.loop);
 
     int at_left  = (rx <= EDGE_ZONE_PX);
     int at_right = (rx >= screen_w - 1 - EDGE_ZONE_PX);
-    int in_safe_zone = (rx > EDGE_REARM_PX && rx < screen_w - 1 - EDGE_REARM_PX);
+    int cur_edge = at_left ? 0 : (at_right ? 1 : -1);
 
-    if (in_safe_zone)
-        edge_triggered = 0;
+    /* compute movement direction: positive dx = moving right */
+    int dx = rx - tap_prev_x;
+    tap_prev_x = rx;
 
-    if (!at_left && !at_right)
+    /* not at any edge — reset tap state if cursor moved well away */
+    if (cur_edge < 0) {
+        int in_safe = (rx > EDGE_REARM_PX && rx < screen_w - 1 - EDGE_REARM_PX);
+        if (in_safe) {
+            tap_count = 0;
+            tap_edge_dir = -1;
+        }
         return;
-
-    if (edge_triggered)
-        return;
-
-    edge_triggered = 1;
-    if (g_edge_cb) {
-        int dir = at_left ? 0 : 1;
-        g_edge_cb(dir, g_edge_ud);
     }
+
+    /* at an edge — check direction consistency:
+     * for LEFT edge, momentum must be leftward (dx < 0)
+     * for RIGHT edge, momentum must be rightward (dx > 0) */
+    int momentum_ok = 0;
+    if (cur_edge == 0 && dx < 0)  momentum_ok = 1;  /* pushing left */
+    if (cur_edge == 1 && dx > 0)  momentum_ok = 1;  /* pushing right */
+    if (dx == 0)                  momentum_ok = 0;   /* no movement */
+
+    if (!momentum_ok)
+        return;
+
+    /* same edge as previous tap and within time window? */
+    if (cur_edge == tap_edge_dir && tap_count > 0 &&
+        (now - tap_first_time) < TWO_TAP_WINDOW_MS) {
+        tap_count++;
+    } else {
+        /* first tap or different edge or expired window */
+        tap_edge_dir = cur_edge;
+        tap_first_time = now;
+        tap_count = 1;
+    }
+
+    if (tap_count < 2)
+        return;
+
+    /* two taps confirmed — start switch delay */
+    if (switch_pending_dir >= 0)
+        return;  /* already waiting */
+
+    switch_pending_dir = cur_edge;
+    tap_count = 0;
+    uv_timer_start(&switch_delay_timer, on_switch_delay, SWITCH_DELAY_MS, 0);
+    LOG_DBG("edge: two-tap detected on %s, confirming in %dms",
+            cur_edge == 0 ? "left" : "right", SWITCH_DELAY_MS);
 }
 
 void input_edge_watch_start(edge_cb_t cb, void *userdata)
 {
     g_edge_cb = cb;
     g_edge_ud = userdata;
-    edge_triggered = 1;  /* start suppressed — require mouse to leave edge first */
-    edge_start_time = uv_now(edge_timer.loop);
+    tap_count = 0;
+    tap_edge_dir = -1;
+    switch_pending_dir = -1;
+
+    /* seed tap_prev_x with current position */
+    Window rr, cr;
+    int ry, wx, wy;
+    unsigned int mask;
+    XQueryPointer(dpy, root, &rr, &cr, &tap_prev_x, &ry, &wx, &wy, &mask);
+
+    uv_timer_init(edge_timer.loop, &switch_delay_timer);
     uv_timer_start(&edge_timer, on_edge_poll, EDGE_POLL_MS, EDGE_POLL_MS);
-    LOG_DBG("edge watch: started (poll every %dms)", EDGE_POLL_MS);
+    LOG_DBG("edge watch: started (two-tap, %dms window, %dms delay)",
+            TWO_TAP_WINDOW_MS, SWITCH_DELAY_MS);
 }
 
 void input_edge_watch_stop(void)
 {
     uv_timer_stop(&edge_timer);
+    uv_timer_stop(&switch_delay_timer);
+    switch_pending_dir = -1;
     g_edge_cb = NULL;
     LOG_DBG("edge watch: stopped");
 }
