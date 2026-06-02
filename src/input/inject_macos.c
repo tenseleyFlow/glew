@@ -4,19 +4,27 @@
 #include "../log.h"
 
 #include <CoreGraphics/CoreGraphics.h>
+#include <ApplicationServices/ApplicationServices.h>
 
 #include "keymap_macos.h"
 
 static int screen_w, screen_h;
+static int trusted;
 
 int input_inject_init(void)
 {
+    trusted = AXIsProcessTrusted();
+    if (!trusted) {
+        LOG_ERR("macOS inject: Accessibility permission not granted — injection will fail silently");
+        LOG_ERR("  → System Settings > Privacy & Security > Accessibility > add glewd");
+    }
+
     CGDirectDisplayID main_display = CGMainDisplayID();
     screen_w = (int)CGDisplayPixelsWide(main_display);
     screen_h = (int)CGDisplayPixelsHigh(main_display);
 
-    LOG_INFO("macOS inject: initialized (%dx%d)", screen_w, screen_h);
-    return 0;
+    LOG_INFO("macOS inject: initialized (%dx%d, trusted=%d)", screen_w, screen_h, trusted);
+    return trusted ? 0 : -1;
 }
 
 void input_inject_event(const input_event_t *ev)

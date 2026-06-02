@@ -13,9 +13,11 @@ static Window        root;
 static int           screen_w, screen_h;
 static uv_timer_t    poll_timer;
 static uv_timer_t    safety_timer;
+static uv_timer_t    grab_retry_timer;
 static input_event_cb g_cb;
 static void          *g_userdata;
 static int            grabbing;
+static int            grab_retries;
 
 #define POLL_INTERVAL_MS   2
 #define SAFETY_TIMEOUT_MS  60000
@@ -138,6 +140,7 @@ int input_capture_init(uv_loop_t *loop)
 
     uv_timer_init(loop, &poll_timer);
     uv_timer_init(loop, &safety_timer);
+    uv_timer_init(loop, &grab_retry_timer);
 
     signal(SIGABRT, crash_handler);
     signal(SIGSEGV, crash_handler);
@@ -147,38 +150,74 @@ int input_capture_init(uv_loop_t *loop)
     return 0;
 }
 
-void input_capture_start(input_event_cb cb, void *userdata)
+#define GRAB_RETRY_MS      50
+#define GRAB_MAX_RETRIES   10
+
+static int try_grab(void)
 {
-    if (grabbing) return;
-
-    g_cb = cb;
-    g_userdata = userdata;
-
     int kb = XGrabKeyboard(dpy, root, True, GrabModeAsync, GrabModeAsync, CurrentTime);
+    if (kb != GrabSuccess) {
+        XFlush(dpy);
+        return kb;
+    }
+
     int ptr = XGrabPointer(dpy, root, True,
                  PointerMotionMask | ButtonPressMask | ButtonReleaseMask,
                  GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
     XFlush(dpy);
 
-    if (kb != GrabSuccess) {
-        LOG_ERR("x11 capture: XGrabKeyboard failed (%d)", kb);
-        XUngrabPointer(dpy, CurrentTime);
-        XFlush(dpy);
-        return;
-    }
     if (ptr != GrabSuccess) {
-        LOG_ERR("x11 capture: XGrabPointer failed (%d)", ptr);
         XUngrabKeyboard(dpy, CurrentTime);
         XFlush(dpy);
-        return;
+        return ptr;
     }
 
     grabbing = 1;
     uv_timer_start(&poll_timer, on_poll_timer, POLL_INTERVAL_MS, POLL_INTERVAL_MS);
     uv_timer_start(&safety_timer, on_safety_timeout, SAFETY_TIMEOUT_MS, 0);
 
-    LOG_INFO("x11 capture: grab active (Scroll_Lock or Ctrl+Alt+Esc to release, "
-             "auto-release in %ds)", SAFETY_TIMEOUT_MS / 1000);
+    LOG_INFO("x11 capture: grab active (F12 to release, auto-release in %ds)",
+             SAFETY_TIMEOUT_MS / 1000);
+    return GrabSuccess;
+}
+
+static void on_grab_retry(uv_timer_t *timer)
+{
+    (void)timer;
+    grab_retries++;
+    int rc = try_grab();
+    if (rc == GrabSuccess)
+        return;
+
+    if (grab_retries >= GRAB_MAX_RETRIES) {
+        LOG_ERR("x11 capture: grab failed after %d retries (last error: %d)",
+                grab_retries, rc);
+        if (g_cb) {
+            input_event_t stop = { .type = -1 };
+            g_cb(&stop, g_userdata);
+        }
+        return;
+    }
+
+    LOG_DBG("x11 capture: grab busy, retry %d/%d in %dms",
+            grab_retries, GRAB_MAX_RETRIES, GRAB_RETRY_MS);
+    uv_timer_start(&grab_retry_timer, on_grab_retry, GRAB_RETRY_MS, 0);
+}
+
+void input_capture_start(input_event_cb cb, void *userdata)
+{
+    if (grabbing) return;
+
+    g_cb = cb;
+    g_userdata = userdata;
+    grab_retries = 0;
+
+    int rc = try_grab();
+    if (rc == GrabSuccess)
+        return;
+
+    LOG_DBG("x11 capture: grab busy (WM keybind active), retrying in %dms", GRAB_RETRY_MS);
+    uv_timer_start(&grab_retry_timer, on_grab_retry, GRAB_RETRY_MS, 0);
 }
 
 void input_capture_stop(void)
@@ -192,6 +231,7 @@ void input_capture_stop(void)
     grabbing = 0;
     uv_timer_stop(&poll_timer);
     uv_timer_stop(&safety_timer);
+    uv_timer_stop(&grab_retry_timer);
 
     if (g_cb) {
         input_event_t stop = { .type = -1 };
@@ -208,6 +248,7 @@ void input_capture_shutdown(void)
     if (dpy) {
         uv_timer_stop(&poll_timer);
         uv_timer_stop(&safety_timer);
+        uv_timer_stop(&grab_retry_timer);
         XCloseDisplay(dpy);
         dpy = NULL;
     }
