@@ -58,7 +58,7 @@ static void on_safety_timeout(uv_timer_t *timer)
     input_capture_stop();
 }
 
-static void process_x_events(void)
+static void process_x_keys(void)
 {
     while (XPending(dpy)) {
         XEvent ev;
@@ -68,12 +68,11 @@ static void process_x_events(void)
 
         switch (ev.type) {
         case KeyPress:
-        case KeyRelease: {
+        case KeyRelease:
             ie.type = (ev.type == KeyPress) ? INPUT_KEY_DOWN : INPUT_KEY_UP;
             ie.keysym = XkbKeycodeToKeysym(dpy, ev.xkey.keycode, 0, 0);
             ie.mods = x_mods_to_mask(ev.xkey.state);
 
-            /* F12 or Ctrl+Alt+Escape releases the grab */
             if (ie.type == INPUT_KEY_DOWN &&
                 (ie.keysym == XK_F12 || ie.keysym == XK_Scroll_Lock)) {
                 LOG_INFO("x11 capture: release key pressed");
@@ -86,18 +85,6 @@ static void process_x_events(void)
                 input_capture_stop();
                 return;
             }
-            break;
-        }
-        case MotionNotify:
-            /* skip events at center — those are from our own warp */
-            if (ev.xmotion.x_root == center_x && ev.xmotion.y_root == center_y)
-                continue;
-            ie.type = INPUT_MOTION;
-            ie.x = (double)(ev.xmotion.x_root - center_x) / screen_w;
-            ie.y = (double)(ev.xmotion.y_root - center_y) / screen_h;
-            ie.mods = x_mods_to_mask(ev.xmotion.state);
-            XWarpPointer(dpy, None, root, 0, 0, 0, 0, center_x, center_y);
-            XFlush(dpy);
             break;
         case ButtonPress:
         case ButtonRelease:
@@ -114,9 +101,6 @@ static void process_x_events(void)
                 ie.type = (ev.type == ButtonPress) ? INPUT_BUTTON_DOWN : INPUT_BUTTON_UP;
                 ie.button = ev.xbutton.button;
             }
-            ie.x = 0;
-            ie.y = 0;
-            ie.mods = x_mods_to_mask(ev.xbutton.state);
             break;
         default:
             continue;
@@ -130,7 +114,32 @@ static void process_x_events(void)
 static void on_poll_timer(uv_timer_t *handle)
 {
     (void)handle;
-    process_x_events();
+
+    /* keyboard and buttons via X events */
+    process_x_keys();
+    if (!grabbing) return;
+
+    /* mouse via XQueryPointer (core MotionNotify unreliable on modern X) */
+    Window rr, cr;
+    int rx, ry, wx, wy;
+    unsigned int mask;
+    if (!XQueryPointer(dpy, root, &rr, &cr, &rx, &ry, &wx, &wy, &mask))
+        return;
+
+    if (rx == center_x && ry == center_y)
+        return;
+
+    input_event_t ie = {
+        .type = INPUT_MOTION,
+        .x = (double)(rx - center_x) / screen_w,
+        .y = (double)(ry - center_y) / screen_h,
+    };
+
+    XWarpPointer(dpy, None, root, 0, 0, 0, 0, center_x, center_y);
+    XFlush(dpy);
+
+    if (g_cb)
+        g_cb(&ie, g_userdata);
 }
 
 int input_capture_init(uv_loop_t *loop)
