@@ -74,6 +74,42 @@ static direction_t arrow_keysym_to_dir(uint32_t keysym)
     }
 }
 
+static void start_edge_watching(void);
+static void start_sending_input(peer_t *target);
+
+static void on_mouse_edge(int dir, void *userdata)
+{
+    (void)userdata;
+    direction_t d = (dir == 0) ? DIR_LEFT : DIR_RIGHT;
+
+    int target_idx;
+    direction_t enter_dir;
+    if (layout_resolve(&g_layout, d, &target_idx, &enter_dir) != 0)
+        return;
+
+    peer_t *p = peer_by_index(&g_mgr, target_idx);
+    if (!p || p->state != PEER_CONNECTED)
+        return;
+
+    LOG_INFO("mouse edge %s: crossing to %s", direction_str(d), p->name);
+
+    glew_msg_t fe = { .type = MSG_FOCUS_ENTER };
+    snprintf(fe.focus_enter.from_direction, sizeof(fe.focus_enter.from_direction),
+             "%s", direction_str(enter_dir));
+    snprintf(fe.focus_enter.source, sizeof(fe.focus_enter.source),
+             "%s", g_cfg.self_name);
+    peer_send(p, &fe);
+
+    input_edge_watch_stop();
+    start_sending_input(p);
+}
+
+static void start_edge_watching(void)
+{
+    if (g_input_mode == MODE_LOCAL)
+        input_edge_watch_start(on_mouse_edge, NULL);
+}
+
 static void on_captured_input(const input_event_t *ev, void *userdata)
 {
     (void)userdata;
@@ -88,6 +124,7 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
         }
         g_input_mode = MODE_LOCAL;
         g_input_target = NULL;
+        start_edge_watching();
         return;
     }
 
@@ -270,7 +307,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
             /* focus returning from remote — release grab, refocus locally */
             LOG_INFO("focus returning from %s (entering from %s)",
                      msg->focus_enter.source, msg->focus_enter.from_direction);
-            input_capture_stop(); /* releases grab, triggers on_captured_input(-1) */
+            input_capture_stop(); /* releases grab, triggers on_captured_input(-1) which restarts edge watch */
             g_driver->focus_edge(from);
             break;
         }
@@ -524,6 +561,7 @@ int main(int argc, char **argv)
     uv_signal_start(&g_sigterm, on_signal, SIGTERM);
 
     peer_mgr_start(&g_mgr);
+    start_edge_watching();
 
     LOG_INFO("glewd %s running (self=%s, wm=%s, port=%d, peers=%d)",
              GLEW_VERSION_STR, g_cfg.self_name, g_cfg.self_wm,

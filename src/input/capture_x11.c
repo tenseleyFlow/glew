@@ -19,6 +19,7 @@ static input_event_cb g_cb;
 static void          *g_userdata;
 static int            grabbing;
 static int            grab_retries;
+static uv_timer_t    edge_timer;
 
 #define POLL_INTERVAL_MS   2
 #define SAFETY_TIMEOUT_MS  60000
@@ -148,6 +149,7 @@ int input_capture_init(uv_loop_t *loop)
     uv_timer_init(loop, &poll_timer);
     uv_timer_init(loop, &safety_timer);
     uv_timer_init(loop, &grab_retry_timer);
+    uv_timer_init(loop, &edge_timer);
 
     signal(SIGABRT, crash_handler);
     signal(SIGSEGV, crash_handler);
@@ -248,14 +250,70 @@ void input_capture_stop(void)
     LOG_INFO("x11 capture: grab released");
 }
 
+/* ── Edge watching ───────────────────────────────────────────────── */
+
+#define EDGE_POLL_MS    50
+#define EDGE_ZONE_PX    2
+
+static edge_cb_t   g_edge_cb;
+static void        *g_edge_ud;
+static int          edge_triggered;
+
+static void on_edge_poll(uv_timer_t *timer)
+{
+    (void)timer;
+    if (!dpy) return;
+
+    Window root_ret, child_ret;
+    int rx, ry, wx, wy;
+    unsigned int mask;
+    if (!XQueryPointer(dpy, root, &root_ret, &child_ret, &rx, &ry, &wx, &wy, &mask))
+        return;
+
+    int at_left  = (rx <= EDGE_ZONE_PX);
+    int at_right = (rx >= screen_w - 1 - EDGE_ZONE_PX);
+
+    if (!at_left && !at_right) {
+        edge_triggered = 0;
+        return;
+    }
+
+    if (edge_triggered)
+        return;
+
+    edge_triggered = 1;
+    if (g_edge_cb) {
+        int dir = at_left ? 0 : 1;
+        g_edge_cb(dir, g_edge_ud);
+    }
+}
+
+void input_edge_watch_start(edge_cb_t cb, void *userdata)
+{
+    g_edge_cb = cb;
+    g_edge_ud = userdata;
+    edge_triggered = 0;
+    uv_timer_start(&edge_timer, on_edge_poll, EDGE_POLL_MS, EDGE_POLL_MS);
+    LOG_DBG("edge watch: started (poll every %dms)", EDGE_POLL_MS);
+}
+
+void input_edge_watch_stop(void)
+{
+    uv_timer_stop(&edge_timer);
+    g_edge_cb = NULL;
+    LOG_DBG("edge watch: stopped");
+}
+
 void input_capture_shutdown(void)
 {
     if (grabbing)
         input_capture_stop();
+    input_edge_watch_stop();
     if (dpy) {
         uv_timer_stop(&poll_timer);
         uv_timer_stop(&safety_timer);
         uv_timer_stop(&grab_retry_timer);
+        uv_timer_stop(&edge_timer);
         XCloseDisplay(dpy);
         dpy = NULL;
     }

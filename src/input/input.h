@@ -37,4 +37,10 @@ int  input_inject_init(void);
 void input_inject_event(const input_event_t *ev);
 void input_inject_shutdown(void);
 
+/* ── Edge watching (detect mouse at screen edge while in local mode) */
+
+typedef void (*edge_cb_t)(int dir, void *userdata); /* dir: 0=left 1=right */
+void input_edge_watch_start(edge_cb_t cb, void *userdata);
+void input_edge_watch_stop(void);
+
 #endif

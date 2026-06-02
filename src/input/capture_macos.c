@@ -231,4 +231,16 @@ void input_capture_shutdown(void)
     close(pipe_fds[1]);
 }
 
+/* ── Edge watching (stub — macOS uses the receiving-side edge check) ── */
+
+void input_edge_watch_start(edge_cb_t cb, void *userdata)
+{
+    (void)cb; (void)userdata;
+    /* macOS edge watching is handled by the receiving-side motion check */
+}
+
+void input_edge_watch_stop(void)
+{
+}
+
 #endif /* __APPLE__ */
