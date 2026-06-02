@@ -157,8 +157,9 @@ static void handle_focus(const char *dir_str, uv_stream_t *client)
              "%s", g_cfg.self_name);
     peer_send(p, &fe);
 
-    /* start capturing and forwarding input */
-    start_sending_input(p);
+    /* start capturing and forwarding input (skip if already capturing to this peer) */
+    if (g_input_mode != MODE_REMOTE_SENDING || g_input_target != p)
+        start_sending_input(p);
 
     glew_msg_t reply = { .type = MSG_FOCUS_RESULT };
     reply.focus_result.crossed = 1;

@@ -4,24 +4,52 @@
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 #include <X11/XKBlib.h>
+#include <signal.h>
+#include <stdlib.h>
 #include <string.h>
 
 static Display      *dpy;
 static Window        root;
 static int           screen_w, screen_h;
 static uv_poll_t     x_poll;
+static uv_timer_t    safety_timer;
 static input_event_cb g_cb;
 static void          *g_userdata;
 static int            grabbing;
+
+#define SAFETY_TIMEOUT_MS 60000
 
 static uint32_t x_mods_to_mask(unsigned int state)
 {
     uint32_t m = 0;
     if (state & ShiftMask)   m |= (1 << 0);
     if (state & ControlMask) m |= (1 << 2);
-    if (state & Mod1Mask)    m |= (1 << 3); /* Alt */
-    if (state & Mod4Mask)    m |= (1 << 6); /* Super */
+    if (state & Mod1Mask)    m |= (1 << 3);
+    if (state & Mod4Mask)    m |= (1 << 6);
     return m;
+}
+
+static void force_ungrab(void)
+{
+    if (dpy) {
+        XUngrabKeyboard(dpy, CurrentTime);
+        XUngrabPointer(dpy, CurrentTime);
+        XFlush(dpy);
+    }
+}
+
+static void crash_handler(int sig)
+{
+    force_ungrab();
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void on_safety_timeout(uv_timer_t *timer)
+{
+    (void)timer;
+    LOG_WARN("x11 capture: safety timeout reached, releasing grab");
+    input_capture_stop();
 }
 
 static void process_x_events(void)
@@ -39,8 +67,15 @@ static void process_x_events(void)
             ie.keysym = XkbKeycodeToKeysym(dpy, ev.xkey.keycode, 0, 0);
             ie.mods = x_mods_to_mask(ev.xkey.state);
 
-            /* escape key releases the grab */
+            /* Scroll_Lock releases the grab */
             if (ie.type == INPUT_KEY_DOWN && ie.keysym == XK_Scroll_Lock) {
+                input_capture_stop();
+                return;
+            }
+            /* Ctrl+Alt+Escape: emergency release */
+            if (ie.type == INPUT_KEY_DOWN && ie.keysym == XK_Escape &&
+                (ev.xkey.state & ControlMask) && (ev.xkey.state & Mod1Mask)) {
+                LOG_WARN("x11 capture: emergency release (Ctrl+Alt+Escape)");
                 input_capture_stop();
                 return;
             }
@@ -58,10 +93,10 @@ static void process_x_events(void)
                 if (ev.type == ButtonRelease) continue;
                 ie.type = INPUT_SCROLL;
                 switch (ev.xbutton.button) {
-                case 4: ie.scroll_y = -3; break;  /* up */
-                case 5: ie.scroll_y =  3; break;  /* down */
-                case 6: ie.scroll_x = -3; break;  /* left */
-                case 7: ie.scroll_x =  3; break;  /* right */
+                case 4: ie.scroll_y = -3; break;
+                case 5: ie.scroll_y =  3; break;
+                case 6: ie.scroll_x = -3; break;
+                case 7: ie.scroll_x =  3; break;
                 }
             } else {
                 ie.type = (ev.type == ButtonPress) ? INPUT_BUTTON_DOWN : INPUT_BUTTON_UP;
@@ -103,6 +138,12 @@ int input_capture_init(uv_loop_t *loop)
 
     int xfd = ConnectionNumber(dpy);
     uv_poll_init(loop, &x_poll, xfd);
+    uv_timer_init(loop, &safety_timer);
+
+    /* release grab on crash so the user isn't locked out */
+    signal(SIGABRT, crash_handler);
+    signal(SIGSEGV, crash_handler);
+    atexit(force_ungrab);
 
     LOG_INFO("x11 capture: initialized (%dx%d)", screen_w, screen_h);
     return 0;
@@ -115,15 +156,31 @@ void input_capture_start(input_event_cb cb, void *userdata)
     g_cb = cb;
     g_userdata = userdata;
 
-    XGrabKeyboard(dpy, root, True, GrabModeAsync, GrabModeAsync, CurrentTime);
-    XGrabPointer(dpy, root, True,
+    int kb = XGrabKeyboard(dpy, root, True, GrabModeAsync, GrabModeAsync, CurrentTime);
+    int ptr = XGrabPointer(dpy, root, True,
                  PointerMotionMask | ButtonPressMask | ButtonReleaseMask,
                  GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
     XFlush(dpy);
 
+    if (kb != GrabSuccess) {
+        LOG_ERR("x11 capture: XGrabKeyboard failed (%d)", kb);
+        XUngrabPointer(dpy, CurrentTime);
+        XFlush(dpy);
+        return;
+    }
+    if (ptr != GrabSuccess) {
+        LOG_ERR("x11 capture: XGrabPointer failed (%d)", ptr);
+        XUngrabKeyboard(dpy, CurrentTime);
+        XFlush(dpy);
+        return;
+    }
+
     grabbing = 1;
     uv_poll_start(&x_poll, UV_READABLE, on_x_readable);
-    LOG_INFO("x11 capture: grab started");
+    uv_timer_start(&safety_timer, on_safety_timeout, SAFETY_TIMEOUT_MS, 0);
+
+    LOG_INFO("x11 capture: grab active (Scroll_Lock or Ctrl+Alt+Esc to release, "
+             "auto-release in %ds)", SAFETY_TIMEOUT_MS / 1000);
 }
 
 void input_capture_stop(void)
@@ -136,8 +193,8 @@ void input_capture_stop(void)
 
     grabbing = 0;
     uv_poll_stop(&x_poll);
+    uv_timer_stop(&safety_timer);
 
-    /* notify via a synthetic "stop" event */
     if (g_cb) {
         input_event_t stop = { .type = -1 };
         g_cb(&stop, g_userdata);
@@ -152,6 +209,7 @@ void input_capture_shutdown(void)
         input_capture_stop();
     if (dpy) {
         uv_poll_stop(&x_poll);
+        uv_timer_stop(&safety_timer);
         XCloseDisplay(dpy);
         dpy = NULL;
     }
