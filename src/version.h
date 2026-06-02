@@ -1,0 +1,9 @@
+#ifndef GLEW_VERSION_H
+#define GLEW_VERSION_H
+
+#define GLEW_VERSION_MAJOR 0
+#define GLEW_VERSION_MINOR 1
+#define GLEW_VERSION_PATCH 0
+#define GLEW_VERSION_STR   "0.1.0"
+
+#endif

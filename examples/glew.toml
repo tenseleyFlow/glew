@@ -1,0 +1,31 @@
+# glew configuration
+# Place at ~/.config/glew/glew.toml
+
+[self]
+name = "dorado"       # hostname of this machine
+wm = "i3"             # window manager: "i3" | "tarmac" | "gar"
+
+# Machines listed left-to-right. Monitors within each machine listed left-to-right.
+[layout]
+
+[[layout.machines]]
+name = "hasu"
+address = "hasu"                        # hostname, IP, or Tailscale address
+monitors = ["DP-1", "DP-2", "HDMI-1"]
+
+[[layout.machines]]
+name = "dorado"
+address = "localhost"
+monitors = ["DP-1", "DP-2", "HDMI-1"]
+
+[[layout.machines]]
+name = "nomad"
+address = "nomad"
+monitors = ["eDP-1"]
+
+[network]
+port = 9437
+secret = "changeme"                     # shared secret for peer auth
+
+[input]
+escape_key = "Scroll_Lock"             # key to return focus to local machine
