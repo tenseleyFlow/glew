@@ -21,6 +21,7 @@ static int            grabbing;
 static int            grab_retries;
 static uv_timer_t    edge_timer;
 static int            center_x, center_y;
+static int            saved_x, saved_y;
 
 #define POLL_INTERVAL_MS   2
 #define SAFETY_TIMEOUT_MS  60000
@@ -200,6 +201,13 @@ static int try_grab(void)
     }
 
     grabbing = 1;
+
+    /* save cursor position so we can restore it on release */
+    Window rr, cr;
+    int wx, wy;
+    unsigned int mask;
+    XQueryPointer(dpy, root, &rr, &cr, &saved_x, &saved_y, &wx, &wy, &mask);
+
     XWarpPointer(dpy, None, root, 0, 0, 0, 0, center_x, center_y);
     XFlush(dpy);
 
@@ -256,6 +264,7 @@ void input_capture_stop(void)
 
     XUngrabKeyboard(dpy, CurrentTime);
     XUngrabPointer(dpy, CurrentTime);
+    XWarpPointer(dpy, None, root, 0, 0, 0, 0, saved_x, saved_y);
     XFlush(dpy);
 
     grabbing = 0;
