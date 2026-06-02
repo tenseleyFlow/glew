@@ -401,6 +401,12 @@ static char *detect_socket_path(void)
     env = getenv("SWAYSOCK");
     if (env) return strdup(env);
 
+    /* gar i3-compat socket */
+    char gar_path[256];
+    snprintf(gar_path, sizeof(gar_path), "/run/user/%d/gar-i3.sock", getuid());
+    if (access(gar_path, F_OK) == 0)
+        return strdup(gar_path);
+
     FILE *fp = popen("i3 --get-socketpath 2>/dev/null", "r");
     if (fp) {
         char buf[512];
