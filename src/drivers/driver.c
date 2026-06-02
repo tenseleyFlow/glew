@@ -41,7 +41,7 @@ static const struct {
 } driver_table[] = {
     { "i3",     &i3_driver },
     { "sway",   &i3_driver },
-    { "gar",    &i3_driver },
+    { "gar",    &gar_driver },
     { "tarmac", &tarmac_driver },
 };
 

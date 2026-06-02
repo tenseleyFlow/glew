@@ -23,6 +23,7 @@ set(COMMON_SOURCES
     src/drivers/driver.c
     src/drivers/i3.c
     src/drivers/tarmac.c
+    src/drivers/gar.c
 )
 
 # glew CLI

@@ -32,6 +32,7 @@ direction_t direction_opposite(direction_t dir);
 /* available drivers */
 extern const wm_driver_t i3_driver;
 extern const wm_driver_t tarmac_driver;
+extern const wm_driver_t gar_driver;
 
 /* look up a driver by name ("i3", "tarmac", "gar") */
 const wm_driver_t *driver_by_name(const char *name);
