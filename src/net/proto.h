@@ -45,7 +45,7 @@ typedef struct {
         struct { char reason[128]; }                        hello_err;
         struct { char from_direction[8]; char source[64]; double cursor_y; } focus_enter;
         struct { int success; }                             focus_ack;
-        struct { char source[64]; uint32_t mods; }           input_start;
+        struct { char source[64]; uint32_t mods; uint32_t seq; } input_start;
         struct {
             int      type;
             uint32_t keysym;
@@ -53,6 +53,7 @@ typedef struct {
             int      button;
             int      scroll_x, scroll_y;
             uint32_t mods;
+            uint32_t seq;
         }                                                   input;
         struct { char direction[8]; }                       focus;
         struct { int crossed; char target[64]; }            focus_result;

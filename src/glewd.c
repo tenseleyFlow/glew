@@ -38,6 +38,8 @@ static int           g_remote_mod_held; /* track mod key state during receiving 
 
 /* virtual cursor on receiving side [0,1] */
 static double        g_virt_x, g_virt_y;
+static uint32_t      g_send_seq;
+static uint32_t      g_recv_seq;
 
 /* cooldown: suppress edge checks briefly after entering a machine */
 static uint64_t      g_edge_cooldown_until;
@@ -158,6 +160,7 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
     msg.input.scroll_x = ev->scroll_x;
     msg.input.scroll_y = ev->scroll_y;
     msg.input.mods = ev->mods;
+    msg.input.seq = g_send_seq;
     peer_send(g_input_target, &msg);
 }
 
@@ -183,11 +186,13 @@ static void start_sending_input(peer_t *target, direction_t cross_dir)
     g_input_mode = MODE_REMOTE_SENDING;
     g_input_target = target;
     g_input_ev_sent = 0;
+    g_send_seq++;
 
     glew_msg_t start = { .type = MSG_INPUT_START };
     snprintf(start.input_start.source, sizeof(start.input_start.source),
              "%s", g_cfg.self_name);
     start.input_start.mods = 0;
+    start.input_start.seq = g_send_seq;
     peer_send(target, &start);
 
     flush_modifiers(target);
@@ -348,10 +353,11 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         break;
 
     case MSG_INPUT_START:
-        LOG_INFO("input: receiving from %s", msg->input_start.source);
+        LOG_INFO("input: receiving from %s (seq=%u)", msg->input_start.source, msg->input_start.seq);
         g_input_mode = MODE_REMOTE_RECEIVING;
         g_input_source = p;
         g_input_ev_recv = 0;
+        g_recv_seq = msg->input_start.seq;
         g_edge_cooldown_until = uv_now(g_loop) + 500;
         break;
 
@@ -363,6 +369,10 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
 
     case MSG_INPUT: {
         if (g_input_mode != MODE_REMOTE_RECEIVING) break;
+        if (msg->input.seq != g_recv_seq) {
+            LOG_DBG("input: stale event (seq %u, expected %u)", msg->input.seq, g_recv_seq);
+            break;
+        }
 
         input_event_t ev = {
             .type     = msg->input.type,
