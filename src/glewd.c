@@ -374,6 +374,39 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
             }
         }
 
+        /* check mouse edge crossing */
+        if (ev.type == INPUT_MOTION) {
+            direction_t edge_dir = -1;
+            if (ev.x <= 0.001) edge_dir = DIR_LEFT;
+            else if (ev.x >= 0.999) edge_dir = DIR_RIGHT;
+
+            if ((int)edge_dir >= 0) {
+                int target_idx;
+                direction_t enter_dir;
+                if (layout_resolve(&g_layout, edge_dir, &target_idx, &enter_dir) == 0) {
+                    peer_t *target = peer_by_index(&g_mgr, target_idx);
+                    if (target && target->state == PEER_CONNECTED) {
+                        LOG_INFO("mouse edge %s: crossing back to %s",
+                                 direction_str(edge_dir), target->name);
+
+                        glew_msg_t fe = { .type = MSG_FOCUS_ENTER };
+                        snprintf(fe.focus_enter.from_direction,
+                                 sizeof(fe.focus_enter.from_direction),
+                                 "%s", direction_str(enter_dir));
+                        snprintf(fe.focus_enter.source,
+                                 sizeof(fe.focus_enter.source),
+                                 "%s", g_cfg.self_name);
+                        peer_send(target, &fe);
+
+                        g_input_mode = MODE_LOCAL;
+                        g_input_source = NULL;
+                        g_remote_mod_held = 0;
+                        break;
+                    }
+                }
+            }
+        }
+
         input_inject_event(&ev);
         break;
     }
