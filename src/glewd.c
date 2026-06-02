@@ -57,6 +57,11 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
 
     g_input_ev_sent++;
 
+    if (ev->type == INPUT_KEY_DOWN)
+        LOG_DBG("capture: KEY_DN keysym=0x%x mods=0x%x", ev->keysym, ev->mods);
+    else if (ev->type == INPUT_KEY_UP)
+        LOG_DBG("capture: KEY_UP keysym=0x%x", ev->keysym);
+
     glew_msg_t msg = { .type = MSG_INPUT };
     msg.input.type = ev->type;
     msg.input.keysym = ev->keysym;
@@ -71,15 +76,14 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
 
 static void flush_modifiers(peer_t *target)
 {
+    /* only release Super (Command on macOS) — the i3 mod key.
+     * blindly releasing Control triggers macOS Dictation shortcut
+     * (double Control release = "Press Control Twice"). */
     static const uint32_t mod_keysyms[] = {
-        0xffe1, 0xffe2, /* Shift_L, Shift_R */
-        0xffe3, 0xffe4, /* Control_L, Control_R */
-        0xffe9, 0xffea, /* Alt_L, Alt_R */
         0xffeb, 0xffec, /* Super_L, Super_R */
     };
-    LOG_DBG("input: flushing %d modifier key-ups to %s",
-            (int)(sizeof(mod_keysyms)/sizeof(mod_keysyms[0])), target->name);
-    for (int i = 0; i < 8; i++) {
+    LOG_DBG("input: flushing Super key-ups to %s", target->name);
+    for (size_t i = 0; i < sizeof(mod_keysyms)/sizeof(mod_keysyms[0]); i++) {
         glew_msg_t m = { .type = MSG_INPUT };
         m.input.type = INPUT_KEY_UP;
         m.input.keysym = mod_keysyms[i];
