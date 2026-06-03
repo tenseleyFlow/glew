@@ -31,7 +31,6 @@ static int            active_edge;  /* 0=left, 1=right, -1=unknown */
 #define GRAB_MAX_RETRIES       10
 #define EDGE_POLL_MS           16
 #define EDGE_ZONE_PX           2
-#define SWITCH_DELAY_MS        100
 
 static uint32_t x_mods_to_mask(unsigned int state)
 {
@@ -317,48 +316,7 @@ double input_get_cursor_y(void)
 static edge_cb_t   g_edge_cb;
 static void        *g_edge_ud;
 
-/* dwell detection: cursor must stay at edge for DWELL_MS to trigger.
- * Resets if cursor leaves the edge zone. */
-#define DWELL_MS  250
-
-static int          dwell_edge_dir;   /* which edge: 0=left, 1=right, -1=none */
-static uint64_t     dwell_start;
-
-/* switch delay state */
-static uv_timer_t   switch_delay_timer;
-static int           switch_pending_dir;
-
-static void on_switch_delay(uv_timer_t *timer)
-{
-    (void)timer;
-
-    /* verify cursor is still at the edge */
-    Window rr, cr;
-    int rx, ry, wx, wy;
-    unsigned int mask;
-    if (!XQueryPointer(dpy, root, &rr, &cr, &rx, &ry, &wx, &wy, &mask))
-        return;
-
-    int still_at_edge = 0;
-    if (switch_pending_dir == 0 && rx <= EDGE_ZONE_PX)
-        still_at_edge = 1;
-    if (switch_pending_dir == 1 && rx >= screen_w - 1 - EDGE_ZONE_PX)
-        still_at_edge = 1;
-
-    if (!still_at_edge) {
-        LOG_DBG("edge: switch cancelled (cursor left edge during delay)");
-        switch_pending_dir = -1;
-        return;
-    }
-
-    LOG_INFO("edge: two-tap confirmed, crossing %s",
-             switch_pending_dir == 0 ? "left" : "right");
-
-    if (g_edge_cb)
-        g_edge_cb(switch_pending_dir, g_edge_ud);
-
-    switch_pending_dir = -1;
-}
+static int edge_armed; /* must leave edge zone before re-triggering */
 
 static void on_edge_poll(uv_timer_t *timer)
 {
@@ -371,52 +329,36 @@ static void on_edge_poll(uv_timer_t *timer)
     if (!XQueryPointer(dpy, root, &rr, &cr, &rx, &ry, &wx, &wy, &mask))
         return;
 
-    uint64_t now = uv_now(edge_timer.loop);
-
     int at_left  = (rx <= EDGE_ZONE_PX);
     int at_right = (rx >= screen_w - 1 - EDGE_ZONE_PX);
-    int cur_edge = at_left ? 0 : (at_right ? 1 : -1);
 
-    /* not at any edge — reset dwell */
-    if (cur_edge < 0) {
-        dwell_edge_dir = -1;
+    if (!at_left && !at_right) {
+        edge_armed = 1;
         return;
     }
 
-    /* started dwelling at a new edge */
-    if (cur_edge != dwell_edge_dir) {
-        dwell_edge_dir = cur_edge;
-        dwell_start = now;
+    if (!edge_armed)
         return;
-    }
 
-    /* still at same edge — check if dwell time met */
-    if ((now - dwell_start) >= DWELL_MS && switch_pending_dir < 0) {
-        switch_pending_dir = cur_edge;
-        dwell_edge_dir = -1;
-        uv_timer_start(&switch_delay_timer, on_switch_delay, SWITCH_DELAY_MS, 0);
-        LOG_DBG("edge: dwell detected on %s (%dms), confirming in %dms",
-                cur_edge == 0 ? "left" : "right", DWELL_MS, SWITCH_DELAY_MS);
-    }
+    edge_armed = 0;
+    int dir = at_left ? 0 : 1;
+    LOG_DBG("edge: crossing %s", dir == 0 ? "left" : "right");
+    if (g_edge_cb)
+        g_edge_cb(dir, g_edge_ud);
 }
 
 void input_edge_watch_start(edge_cb_t cb, void *userdata)
 {
     g_edge_cb = cb;
     g_edge_ud = userdata;
-    dwell_edge_dir = -1;
-    switch_pending_dir = -1;
-
-    uv_timer_init(edge_timer.loop, &switch_delay_timer);
+    edge_armed = 0; /* require leaving edge zone before first trigger */
     uv_timer_start(&edge_timer, on_edge_poll, EDGE_POLL_MS, EDGE_POLL_MS);
-    LOG_DBG("edge watch: started (dwell %dms + confirm %dms)", DWELL_MS, SWITCH_DELAY_MS);
+    LOG_DBG("edge watch: started");
 }
 
 void input_edge_watch_stop(void)
 {
     uv_timer_stop(&edge_timer);
-    uv_timer_stop(&switch_delay_timer);
-    switch_pending_dir = -1;
     g_edge_cb = NULL;
     LOG_DBG("edge watch: stopped");
 }
