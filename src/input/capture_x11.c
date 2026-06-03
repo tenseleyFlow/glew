@@ -378,8 +378,6 @@ static void on_edge_poll(uv_timer_t *timer)
     int at_right = (rx >= screen_w - 1 - EDGE_ZONE_PX);
     int cur_edge = at_left ? 0 : (at_right ? 1 : -1);
 
-    /* compute movement direction: positive dx = moving right */
-    int dx = rx - tap_prev_x;
     tap_prev_x = rx;
 
     /* not at any edge — reset tap state if cursor moved well away */
@@ -391,17 +389,6 @@ static void on_edge_poll(uv_timer_t *timer)
         }
         return;
     }
-
-    /* at an edge — check direction consistency:
-     * for LEFT edge, momentum must be leftward (dx < 0)
-     * for RIGHT edge, momentum must be rightward (dx > 0) */
-    int momentum_ok = 0;
-    if (cur_edge == 0 && dx < 0)  momentum_ok = 1;  /* pushing left */
-    if (cur_edge == 1 && dx > 0)  momentum_ok = 1;  /* pushing right */
-    if (dx == 0)                  momentum_ok = 0;   /* no movement */
-
-    if (!momentum_ok)
-        return;
 
     /* same edge as previous tap and within time window? */
     if (cur_edge == tap_edge_dir && tap_count > 0 &&

@@ -177,6 +177,7 @@ static void flush_modifiers(peer_t *target)
         glew_msg_t m = { .type = MSG_INPUT };
         m.input.type = INPUT_KEY_UP;
         m.input.keysym = mod_keysyms[i];
+        m.input.seq = g_send_seq;
         peer_send(target, &m);
     }
 }
