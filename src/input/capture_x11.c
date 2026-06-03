@@ -31,8 +31,6 @@ static int            active_edge;  /* 0=left, 1=right, -1=unknown */
 #define GRAB_MAX_RETRIES       10
 #define EDGE_POLL_MS           16
 #define EDGE_ZONE_PX           2
-#define EDGE_REARM_PX          100
-#define TWO_TAP_WINDOW_MS      300
 #define SWITCH_DELAY_MS        100
 
 static uint32_t x_mods_to_mask(unsigned int state)
@@ -319,21 +317,12 @@ double input_get_cursor_y(void)
 static edge_cb_t   g_edge_cb;
 static void        *g_edge_ud;
 
-/* two-tap state machine:
- * IDLE → cursor hits edge → FIRST_TAP (record time)
- *      → cursor leaves edge → WAITING_SECOND
- *      → cursor hits same edge within window → trigger
- * Any state → cursor enters safe zone → IDLE */
-typedef enum {
-    TAP_IDLE,
-    TAP_FIRST,
-    TAP_WAITING_SECOND,
-} tap_state_t;
+/* dwell detection: cursor must stay at edge for DWELL_MS to trigger.
+ * Resets if cursor leaves the edge zone. */
+#define DWELL_MS  250
 
-static tap_state_t  tap_state;
-static int          tap_edge_dir;    /* which edge: 0=left, 1=right, -1=none */
-static uint64_t     tap_first_time;
-static int          tap_prev_x;
+static int          dwell_edge_dir;   /* which edge: 0=left, 1=right, -1=none */
+static uint64_t     dwell_start;
 
 /* switch delay state */
 static uv_timer_t   switch_delay_timer;
@@ -388,46 +377,26 @@ static void on_edge_poll(uv_timer_t *timer)
     int at_right = (rx >= screen_w - 1 - EDGE_ZONE_PX);
     int cur_edge = at_left ? 0 : (at_right ? 1 : -1);
 
-    tap_prev_x = rx;
-    int in_safe = (rx > EDGE_REARM_PX && rx < screen_w - 1 - EDGE_REARM_PX);
+    /* not at any edge — reset dwell */
+    if (cur_edge < 0) {
+        dwell_edge_dir = -1;
+        return;
+    }
 
-    switch (tap_state) {
-    case TAP_IDLE:
-        if (cur_edge >= 0) {
-            tap_state = TAP_FIRST;
-            tap_edge_dir = cur_edge;
-            tap_first_time = now;
-        }
-        break;
+    /* started dwelling at a new edge */
+    if (cur_edge != dwell_edge_dir) {
+        dwell_edge_dir = cur_edge;
+        dwell_start = now;
+        return;
+    }
 
-    case TAP_FIRST:
-        if (in_safe || (cur_edge >= 0 && cur_edge != tap_edge_dir)) {
-            /* moved away from edge or hit different edge — ready for second tap */
-            tap_state = TAP_WAITING_SECOND;
-        }
-        if (cur_edge < 0 && !in_safe) {
-            /* left edge but not far enough — still waiting */
-            tap_state = TAP_WAITING_SECOND;
-        }
-        if ((now - tap_first_time) >= TWO_TAP_WINDOW_MS) {
-            tap_state = TAP_IDLE;
-        }
-        break;
-
-    case TAP_WAITING_SECOND:
-        if ((now - tap_first_time) >= TWO_TAP_WINDOW_MS) {
-            tap_state = TAP_IDLE;
-            break;
-        }
-        if (cur_edge == tap_edge_dir && switch_pending_dir < 0) {
-            /* second tap on same edge within window — trigger! */
-            switch_pending_dir = cur_edge;
-            tap_state = TAP_IDLE;
-            uv_timer_start(&switch_delay_timer, on_switch_delay, SWITCH_DELAY_MS, 0);
-            LOG_DBG("edge: two-tap detected on %s, confirming in %dms",
-                    cur_edge == 0 ? "left" : "right", SWITCH_DELAY_MS);
-        }
-        break;
+    /* still at same edge — check if dwell time met */
+    if ((now - dwell_start) >= DWELL_MS && switch_pending_dir < 0) {
+        switch_pending_dir = cur_edge;
+        dwell_edge_dir = -1;
+        uv_timer_start(&switch_delay_timer, on_switch_delay, SWITCH_DELAY_MS, 0);
+        LOG_DBG("edge: dwell detected on %s (%dms), confirming in %dms",
+                cur_edge == 0 ? "left" : "right", DWELL_MS, SWITCH_DELAY_MS);
     }
 }
 
@@ -435,20 +404,12 @@ void input_edge_watch_start(edge_cb_t cb, void *userdata)
 {
     g_edge_cb = cb;
     g_edge_ud = userdata;
-    tap_state = TAP_IDLE;
-    tap_edge_dir = -1;
+    dwell_edge_dir = -1;
     switch_pending_dir = -1;
-
-    /* seed tap_prev_x with current position */
-    Window rr, cr;
-    int ry, wx, wy;
-    unsigned int mask;
-    XQueryPointer(dpy, root, &rr, &cr, &tap_prev_x, &ry, &wx, &wy, &mask);
 
     uv_timer_init(edge_timer.loop, &switch_delay_timer);
     uv_timer_start(&edge_timer, on_edge_poll, EDGE_POLL_MS, EDGE_POLL_MS);
-    LOG_DBG("edge watch: started (two-tap, %dms window, %dms delay)",
-            TWO_TAP_WINDOW_MS, SWITCH_DELAY_MS);
+    LOG_DBG("edge watch: started (dwell %dms + confirm %dms)", DWELL_MS, SWITCH_DELAY_MS);
 }
 
 void input_edge_watch_stop(void)
