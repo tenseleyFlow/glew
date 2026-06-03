@@ -342,8 +342,10 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
 
         double cy = msg->focus_enter.cursor_y;
         if (cy < 0.0 || cy > 1.0) cy = 0.5;
-        if (from == DIR_LEFT)       { g_virt_x = 0.0;  g_virt_y = cy; }
-        else if (from == DIR_RIGHT) { g_virt_x = 1.0;  g_virt_y = cy; }
+        /* start cursor inset from the entry edge to prevent immediate
+         * edge dwell triggering on the first mouse movement */
+        if (from == DIR_LEFT)       { g_virt_x = 0.1;  g_virt_y = cy; }
+        else if (from == DIR_RIGHT) { g_virt_x = 0.9;  g_virt_y = cy; }
         else                        { g_virt_x = 0.5;  g_virt_y = cy; }
 
         int rc = g_driver->focus_edge(from);
