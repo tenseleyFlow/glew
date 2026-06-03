@@ -319,11 +319,21 @@ double input_get_cursor_y(void)
 static edge_cb_t   g_edge_cb;
 static void        *g_edge_ud;
 
-/* two-tap state */
+/* two-tap state machine:
+ * IDLE → cursor hits edge → FIRST_TAP (record time)
+ *      → cursor leaves edge → WAITING_SECOND
+ *      → cursor hits same edge within window → trigger
+ * Any state → cursor enters safe zone → IDLE */
+typedef enum {
+    TAP_IDLE,
+    TAP_FIRST,
+    TAP_WAITING_SECOND,
+} tap_state_t;
+
+static tap_state_t  tap_state;
 static int          tap_edge_dir;    /* which edge: 0=left, 1=right, -1=none */
-static uint64_t     tap_first_time;  /* when first tap happened */
-static int          tap_prev_x;      /* previous x for delta direction check */
-static int          tap_count;
+static uint64_t     tap_first_time;
+static int          tap_prev_x;
 
 /* switch delay state */
 static uv_timer_t   switch_delay_timer;
@@ -379,47 +389,53 @@ static void on_edge_poll(uv_timer_t *timer)
     int cur_edge = at_left ? 0 : (at_right ? 1 : -1);
 
     tap_prev_x = rx;
+    int in_safe = (rx > EDGE_REARM_PX && rx < screen_w - 1 - EDGE_REARM_PX);
 
-    /* not at any edge — reset tap state if cursor moved well away */
-    if (cur_edge < 0) {
-        int in_safe = (rx > EDGE_REARM_PX && rx < screen_w - 1 - EDGE_REARM_PX);
-        if (in_safe) {
-            tap_count = 0;
-            tap_edge_dir = -1;
+    switch (tap_state) {
+    case TAP_IDLE:
+        if (cur_edge >= 0) {
+            tap_state = TAP_FIRST;
+            tap_edge_dir = cur_edge;
+            tap_first_time = now;
         }
-        return;
+        break;
+
+    case TAP_FIRST:
+        if (in_safe || (cur_edge >= 0 && cur_edge != tap_edge_dir)) {
+            /* moved away from edge or hit different edge — ready for second tap */
+            tap_state = TAP_WAITING_SECOND;
+        }
+        if (cur_edge < 0 && !in_safe) {
+            /* left edge but not far enough — still waiting */
+            tap_state = TAP_WAITING_SECOND;
+        }
+        if ((now - tap_first_time) >= TWO_TAP_WINDOW_MS) {
+            tap_state = TAP_IDLE;
+        }
+        break;
+
+    case TAP_WAITING_SECOND:
+        if ((now - tap_first_time) >= TWO_TAP_WINDOW_MS) {
+            tap_state = TAP_IDLE;
+            break;
+        }
+        if (cur_edge == tap_edge_dir && switch_pending_dir < 0) {
+            /* second tap on same edge within window — trigger! */
+            switch_pending_dir = cur_edge;
+            tap_state = TAP_IDLE;
+            uv_timer_start(&switch_delay_timer, on_switch_delay, SWITCH_DELAY_MS, 0);
+            LOG_DBG("edge: two-tap detected on %s, confirming in %dms",
+                    cur_edge == 0 ? "left" : "right", SWITCH_DELAY_MS);
+        }
+        break;
     }
-
-    /* same edge as previous tap and within time window? */
-    if (cur_edge == tap_edge_dir && tap_count > 0 &&
-        (now - tap_first_time) < TWO_TAP_WINDOW_MS) {
-        tap_count++;
-    } else {
-        /* first tap or different edge or expired window */
-        tap_edge_dir = cur_edge;
-        tap_first_time = now;
-        tap_count = 1;
-    }
-
-    if (tap_count < 2)
-        return;
-
-    /* two taps confirmed — start switch delay */
-    if (switch_pending_dir >= 0)
-        return;  /* already waiting */
-
-    switch_pending_dir = cur_edge;
-    tap_count = 0;
-    uv_timer_start(&switch_delay_timer, on_switch_delay, SWITCH_DELAY_MS, 0);
-    LOG_DBG("edge: two-tap detected on %s, confirming in %dms",
-            cur_edge == 0 ? "left" : "right", SWITCH_DELAY_MS);
 }
 
 void input_edge_watch_start(edge_cb_t cb, void *userdata)
 {
     g_edge_cb = cb;
     g_edge_ud = userdata;
-    tap_count = 0;
+    tap_state = TAP_IDLE;
     tap_edge_dir = -1;
     switch_pending_dir = -1;
 
