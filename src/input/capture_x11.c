@@ -278,11 +278,11 @@ void input_capture_stop(void)
 
     XUngrabKeyboard(dpy, CurrentTime);
     XUngrabPointer(dpy, CurrentTime);
-    /* restore cursor from the active edge slot */
+    /* restore cursor near the crossing edge but inset to avoid re-triggering */
     int rx, ry;
-    if (active_edge == 0)      { rx = saved_left_x;  ry = saved_left_y; }
-    else if (active_edge == 1) { rx = saved_right_x; ry = saved_right_y; }
-    else                       { rx = center_x;      ry = center_y; }
+    if (active_edge == 0)      { rx = 100;            ry = saved_left_y; }
+    else if (active_edge == 1) { rx = screen_w - 100; ry = saved_right_y; }
+    else                       { rx = center_x;       ry = center_y; }
 
     XWarpPointer(dpy, None, root, 0, 0, 0, 0, rx, ry);
     XFlush(dpy);
