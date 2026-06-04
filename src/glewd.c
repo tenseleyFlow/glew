@@ -456,6 +456,11 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                     }
                 }
                 /* no neighbor — fall through to inject */
+            } else if (g_driver->dispatch_hotkey &&
+                       g_driver->dispatch_hotkey(ev.keysym, ev.mods)) {
+                LOG_DBG("remote hotkey: keysym=0x%x dispatched via %s",
+                        ev.keysym, g_driver->name);
+                break;
             }
         }
 

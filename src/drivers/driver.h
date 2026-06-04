@@ -1,6 +1,8 @@
 #ifndef GLEW_DRIVER_H
 #define GLEW_DRIVER_H
 
+#include <stdint.h>
+
 typedef enum {
     DIR_LEFT,
     DIR_RIGHT,
@@ -23,6 +25,11 @@ typedef struct wm_driver {
     /* Focus the edge-most window when receiving focus from a direction.
      * e.g., focus_edge(DIR_RIGHT) focuses the rightmost window. */
     int  (*focus_edge)(direction_t dir);
+
+    /* Route a mod+key combo through the WM's IPC instead of raw injection.
+     * Returns 1 if handled (caller should not inject), 0 if not handled.
+     * NULL means "never handles hotkeys" (same as always returning 0). */
+    int  (*dispatch_hotkey)(uint32_t keysym, uint32_t mods);
 } wm_driver_t;
 
 const char *direction_str(direction_t dir);
