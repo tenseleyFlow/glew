@@ -12,10 +12,40 @@
 
 static int sock_fd = -1;
 static int focus_already_moved = 0;
+static char gar_sock_path[256];
+
+/* ── Connection management ──────────────────────────────────────── */
+
+static int gar_connect(void)
+{
+    if (sock_fd >= 0) {
+        close(sock_fd);
+        sock_fd = -1;
+    }
+
+    sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock_fd < 0) {
+        LOG_ERR("gar: socket(): %s", strerror(errno));
+        return -1;
+    }
+
+    struct sockaddr_un addr = { .sun_family = AF_UNIX };
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", gar_sock_path);
+
+    if (connect(sock_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        LOG_ERR("gar: connect(%s): %s", gar_sock_path, strerror(errno));
+        close(sock_fd);
+        sock_fd = -1;
+        return -1;
+    }
+
+    LOG_INFO("gar: connected to %s", gar_sock_path);
+    return 0;
+}
 
 /* ── IPC protocol (newline-delimited JSON, gar native) ──────────── */
 
-static cJSON *gar_request(const char *command, cJSON *args)
+static cJSON *gar_request_once(const char *command, cJSON *args)
 {
     cJSON *req = cJSON_CreateObject();
     cJSON_AddStringToObject(req, "command", command);
@@ -33,19 +63,15 @@ static cJSON *gar_request(const char *command, cJSON *args)
         w = write(sock_fd, "\n", 1);
     free(json);
 
-    if (w <= 0) {
-        LOG_ERR("gar: send failed: %s", strerror(errno));
+    if (w <= 0)
         return NULL;
-    }
 
     char buf[8192];
     size_t pos = 0;
     while (pos < sizeof(buf) - 1) {
         ssize_t r = read(sock_fd, buf + pos, 1);
-        if (r <= 0) {
-            LOG_ERR("gar: recv failed");
+        if (r <= 0)
             return NULL;
-        }
         if (buf[pos] == '\n')
             break;
         pos++;
@@ -53,6 +79,20 @@ static cJSON *gar_request(const char *command, cJSON *args)
     buf[pos] = '\0';
 
     return cJSON_Parse(buf);
+}
+
+static cJSON *gar_request(const char *command, cJSON *args)
+{
+    cJSON *resp = gar_request_once(command, args);
+    if (resp)
+        return resp;
+
+    LOG_WARN("gar: request failed, reconnecting");
+    if (gar_connect() != 0)
+        return NULL;
+
+    /* rebuild args since gar_request_once consumed them via cJSON_Delete(req) */
+    return gar_request_once(command, args);
 }
 
 static int gar_focus(const char *dir_str)
@@ -88,37 +128,17 @@ static int get_focused_id(void)
 
 static int gar_drv_init(const char *socket_path)
 {
-    const char *path = socket_path;
-    char auto_path[256];
-
-    if (!path) {
+    if (socket_path) {
+        snprintf(gar_sock_path, sizeof(gar_sock_path), "%s", socket_path);
+    } else {
         const char *xdg = getenv("XDG_RUNTIME_DIR");
-        if (xdg) {
-            snprintf(auto_path, sizeof(auto_path), "%s/gar.sock", xdg);
-        } else {
-            snprintf(auto_path, sizeof(auto_path), "/tmp/gar.sock");
-        }
-        path = auto_path;
+        if (xdg)
+            snprintf(gar_sock_path, sizeof(gar_sock_path), "%s/gar.sock", xdg);
+        else
+            snprintf(gar_sock_path, sizeof(gar_sock_path), "/tmp/gar.sock");
     }
 
-    sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sock_fd < 0) {
-        LOG_ERR("gar: socket(): %s", strerror(errno));
-        return -1;
-    }
-
-    struct sockaddr_un addr = { .sun_family = AF_UNIX };
-    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
-
-    if (connect(sock_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        LOG_ERR("gar: connect(%s): %s", path, strerror(errno));
-        close(sock_fd);
-        sock_fd = -1;
-        return -1;
-    }
-
-    LOG_INFO("gar: connected to %s", path);
-    return 0;
+    return gar_connect();
 }
 
 static void gar_drv_shutdown(void)
