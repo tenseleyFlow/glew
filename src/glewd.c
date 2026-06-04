@@ -403,34 +403,33 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                     g_driver->do_focus(dir);
                     LOG_DBG("remote focus %s: moved within %s",
                             direction_str(dir), g_driver->name);
-                } else {
-                    /* at the edge — try cross back to sender */
-                    int target_idx;
-                    direction_t enter_dir;
-                    if (layout_resolve(&g_layout, dir, &target_idx, &enter_dir) == 0) {
-                        peer_t *target = peer_by_index(&g_mgr, target_idx);
-                        if (target && target->state == PEER_CONNECTED) {
-                            LOG_INFO("focus %s: crossing back to %s",
-                                     direction_str(dir), target->name);
+                    break;
+                }
+                /* at WM edge — try cross to neighbor */
+                int target_idx;
+                direction_t enter_dir;
+                if (layout_resolve(&g_layout, dir, &target_idx, &enter_dir) == 0) {
+                    peer_t *target = peer_by_index(&g_mgr, target_idx);
+                    if (target && target->state == PEER_CONNECTED) {
+                        LOG_INFO("focus %s: crossing to %s",
+                                 direction_str(dir), target->name);
 
-                            glew_msg_t fe = { .type = MSG_FOCUS_ENTER };
-                            snprintf(fe.focus_enter.from_direction,
-                                     sizeof(fe.focus_enter.from_direction),
-                                     "%s", direction_str(enter_dir));
-                            snprintf(fe.focus_enter.source,
-                                     sizeof(fe.focus_enter.source),
-                                     "%s", g_cfg.self_name);
-                            fe.focus_enter.cursor_y = g_virt_y;
-                            peer_send(target, &fe);
+                        glew_msg_t fe = { .type = MSG_FOCUS_ENTER };
+                        snprintf(fe.focus_enter.from_direction,
+                                 sizeof(fe.focus_enter.from_direction),
+                                 "%s", direction_str(enter_dir));
+                        snprintf(fe.focus_enter.source,
+                                 sizeof(fe.focus_enter.source),
+                                 "%s", g_cfg.self_name);
+                        fe.focus_enter.cursor_y = g_virt_y;
+                        peer_send(target, &fe);
 
-                            g_input_mode = MODE_LOCAL;
-                            g_input_source = NULL;
-                        }
-                    } else {
-                        LOG_DBG("remote focus %s: at absolute edge", direction_str(dir));
+                        g_input_mode = MODE_LOCAL;
+                        g_input_source = NULL;
+                        break;
                     }
                 }
-                break; /* don't inject mod+direction */
+                /* no neighbor — fall through to inject */
             }
         }
 
