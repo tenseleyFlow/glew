@@ -31,9 +31,10 @@ void input_capture_start(input_event_cb cb, void *userdata, int crossing_dir);
 void input_capture_stop(void);
 void input_capture_shutdown(void);
 
-/* ── Cursor query ───────────────────────────────────────────────── */
+/* ── Cursor/modifier query ──────────────────────────────────────── */
 
 double input_get_cursor_y(void);
+uint32_t input_get_mod_mask(void);
 
 /* ── Injection (receives events, injects locally) ───────────────── */
 

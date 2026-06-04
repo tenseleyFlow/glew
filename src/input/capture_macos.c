@@ -240,6 +240,19 @@ double input_get_cursor_y(void)
     return (double)loc.y / screen_h;
 }
 
+uint32_t input_get_mod_mask(void)
+{
+    CGEventRef event = CGEventCreate(NULL);
+    CGEventFlags flags = CGEventGetFlags(event);
+    CFRelease(event);
+    uint32_t m = 0;
+    if (flags & kCGEventFlagMaskShift)     m |= (1 << 0);
+    if (flags & kCGEventFlagMaskControl)   m |= (1 << 2);
+    if (flags & kCGEventFlagMaskAlternate) m |= (1 << 3);
+    if (flags & kCGEventFlagMaskCommand)   m |= (1 << 6);
+    return m;
+}
+
 /* ── Edge watching (stub — macOS uses the receiving-side edge check) ── */
 
 void input_edge_watch_start(edge_cb_t cb, void *userdata)

@@ -48,10 +48,17 @@ static int           g_recv_edge_armed;
 static uint64_t      g_edge_cooldown_until;
 
 /* keysyms for the WM mod key — determined per WM type */
-static int is_mod_keysym(uint32_t keysym)
+/* mod mask bit for this machine's WM — used for focus interception */
+static uint32_t g_local_mod_bit;
+
+static void init_local_mod(void)
 {
-    return keysym == 0xffe9 || keysym == 0xffea ||  /* Alt_L, Alt_R */
-           keysym == 0xffeb || keysym == 0xffec;    /* Super_L, Super_R */
+    const char *wm = g_cfg.self_wm;
+    if (strcmp(wm, "tarmac") == 0) {
+        g_local_mod_bit = (1 << 3); /* Alt/Option */
+    } else {
+        g_local_mod_bit = (1 << 6); /* Super — i3, gar, sway */
+    }
 }
 
 static direction_t arrow_keysym_to_dir(uint32_t keysym)
@@ -162,17 +169,22 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
     peer_send(g_input_target, &msg);
 }
 
-static void flush_modifiers(peer_t *target)
+static void sync_modifiers(peer_t *target)
 {
-    static const uint32_t mod_keysyms[] = {
-        0xffe9, 0xffea, /* Alt_L, Alt_R */
-        0xffeb, 0xffec, /* Super_L, Super_R */
+    uint32_t held = input_get_mod_mask();
+
+    static const struct { uint32_t bit; uint32_t keysym; } mods[] = {
+        { (1 << 0), 0xffe1 }, /* Shift → Shift_L */
+        { (1 << 2), 0xffe3 }, /* Control → Control_L */
+        { (1 << 3), 0xffe9 }, /* Alt → Alt_L */
+        { (1 << 6), 0xffeb }, /* Super → Super_L */
     };
-    LOG_DBG("input: flushing modifier key-ups to %s", target->name);
-    for (size_t i = 0; i < sizeof(mod_keysyms)/sizeof(mod_keysyms[0]); i++) {
+
+    LOG_DBG("input: syncing modifiers to %s (held=0x%x)", target->name, held);
+    for (size_t i = 0; i < sizeof(mods)/sizeof(mods[0]); i++) {
         glew_msg_t m = { .type = MSG_INPUT };
-        m.input.type = INPUT_KEY_UP;
-        m.input.keysym = mod_keysyms[i];
+        m.input.type = (held & mods[i].bit) ? INPUT_KEY_DOWN : INPUT_KEY_UP;
+        m.input.keysym = mods[i].keysym;
         m.input.seq = g_send_seq;
         peer_send(target, &m);
     }
@@ -192,7 +204,7 @@ static void start_sending_input(peer_t *target, direction_t cross_dir)
     start.input_start.seq = g_send_seq;
     peer_send(target, &start);
 
-    flush_modifiers(target);
+    sync_modifiers(target);
 
     int edge_dir = (cross_dir == DIR_LEFT) ? 0 : (cross_dir == DIR_RIGHT) ? 1 : -1;
     input_capture_start(on_captured_input, NULL, edge_dir);
@@ -391,10 +403,10 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         else if (ev.type == INPUT_KEY_UP)
             LOG_DBG("inject: KEY_UP keysym=0x%x", ev.keysym);
 
-        /* intercept mod+direction: route through WM driver.
-         * check mods field directly — the initial mod key-down may have
-         * occurred before the grab started and never been captured. */
-        int mod_held = (ev.mods & 0x08) || (ev.mods & 0x40); /* Alt or Super */
+        /* intercept mod+direction: route through local WM driver.
+         * check mods field — only intercept the LOCAL WM's mod key,
+         * not all modifiers (alt+arrow for terminal word jump must pass through) */
+        int mod_held = (ev.mods & g_local_mod_bit);
         if (mod_held && ev.type == INPUT_KEY_DOWN) {
             direction_t dir = arrow_keysym_to_dir(ev.keysym);
             if ((int)dir >= 0) {
@@ -579,6 +591,7 @@ int main(int argc, char **argv)
     if (g_driver->init(NULL) != 0)
         return 1;
 
+    init_local_mod();
     g_loop = uv_default_loop();
 
     /* init input subsystems */

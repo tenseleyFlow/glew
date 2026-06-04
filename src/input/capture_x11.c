@@ -311,6 +311,22 @@ double input_get_cursor_y(void)
     return (double)ry / screen_h;
 }
 
+uint32_t input_get_mod_mask(void)
+{
+    if (!dpy) return 0;
+    Window rr, cr;
+    int rx, ry, wx, wy;
+    unsigned int mask;
+    if (!XQueryPointer(dpy, root, &rr, &cr, &rx, &ry, &wx, &wy, &mask))
+        return 0;
+    uint32_t m = 0;
+    if (mask & ShiftMask)   m |= (1 << 0);
+    if (mask & ControlMask) m |= (1 << 2);
+    if (mask & Mod1Mask)    m |= (1 << 3);
+    if (mask & Mod4Mask)    m |= (1 << 6);
+    return m;
+}
+
 /* ── Edge watching with two-tap + switch delay ──────────────────── */
 
 static edge_cb_t   g_edge_cb;
