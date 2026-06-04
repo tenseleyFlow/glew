@@ -50,30 +50,10 @@ static uint64_t      g_recv_edge_start;
 static uint64_t      g_edge_cooldown_until;
 
 /* keysyms for the WM mod key — determined per WM type */
-static uint32_t g_mod_keysyms[4];
-static int      g_mod_keysym_count;
-
-static void init_mod_keysyms(void)
-{
-    const char *wm = g_cfg.self_wm;
-    if (strcmp(wm, "tarmac") == 0 || strcmp(wm, "gar") == 0) {
-        /* tarmac/gar use Alt/Option as mod */
-        g_mod_keysyms[0] = 0xffe9; /* Alt_L */
-        g_mod_keysyms[1] = 0xffea; /* Alt_R */
-        g_mod_keysym_count = 2;
-    } else {
-        /* i3/sway use Super as mod */
-        g_mod_keysyms[0] = 0xffeb; /* Super_L */
-        g_mod_keysyms[1] = 0xffec; /* Super_R */
-        g_mod_keysym_count = 2;
-    }
-}
-
 static int is_mod_keysym(uint32_t keysym)
 {
-    for (int i = 0; i < g_mod_keysym_count; i++)
-        if (g_mod_keysyms[i] == keysym) return 1;
-    return 0;
+    return keysym == 0xffe9 || keysym == 0xffea ||  /* Alt_L, Alt_R */
+           keysym == 0xffeb || keysym == 0xffec;    /* Super_L, Super_R */
 }
 
 static direction_t arrow_keysym_to_dir(uint32_t keysym)
@@ -171,13 +151,11 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
 
 static void flush_modifiers(peer_t *target)
 {
-    /* only release Super (Command on macOS) — the i3 mod key.
-     * blindly releasing Control triggers macOS Dictation shortcut
-     * (double Control release = "Press Control Twice"). */
     static const uint32_t mod_keysyms[] = {
+        0xffe9, 0xffea, /* Alt_L, Alt_R */
         0xffeb, 0xffec, /* Super_L, Super_R */
     };
-    LOG_DBG("input: flushing Super key-ups to %s", target->name);
+    LOG_DBG("input: flushing modifier key-ups to %s", target->name);
     for (size_t i = 0; i < sizeof(mod_keysyms)/sizeof(mod_keysyms[0]); i++) {
         glew_msg_t m = { .type = MSG_INPUT };
         m.input.type = INPUT_KEY_UP;
@@ -604,8 +582,6 @@ int main(int argc, char **argv)
 
     if (g_driver->init(NULL) != 0)
         return 1;
-
-    init_mod_keysyms();
 
     g_loop = uv_default_loop();
 
