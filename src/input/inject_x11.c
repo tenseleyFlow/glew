@@ -60,29 +60,25 @@ void input_inject_event(const input_event_t *ev)
         KeyCode kc = XKeysymToKeycode(dpy, ev->keysym);
         if (kc == 0) break;
 
-        if (is_modifier_keysym(ev->keysym) || ev->mods == 0) {
-            XTestFakeKeyEvent(dpy, kc, ev->type == INPUT_KEY_DOWN, CurrentTime);
-        } else {
-            /* XTest doesn't reliably track modifier state from synthetic
-             * key presses on all X servers. Use XSendEvent with the
-             * modifier state set explicitly in the event structure. */
-            Window focused;
-            int revert;
-            XGetInputFocus(dpy, &focused, &revert);
+        /* Use XSendEvent with explicit modifier state for all key events.
+         * XTestFakeKeyEvent doesn't reliably track modifier state from
+         * synthetic presses on some X servers (confirmed on NixOS/gar). */
+        Window focused;
+        int revert;
+        XGetInputFocus(dpy, &focused, &revert);
 
-            XEvent xev = {0};
-            xev.xkey.type = (ev->type == INPUT_KEY_DOWN) ? KeyPress : KeyRelease;
-            xev.xkey.display = dpy;
-            xev.xkey.window = focused;
-            xev.xkey.root = root;
-            xev.xkey.time = CurrentTime;
-            xev.xkey.keycode = kc;
-            xev.xkey.state = mods_to_x11(ev->mods);
-            xev.xkey.same_screen = True;
+        XEvent xev = {0};
+        xev.xkey.type = (ev->type == INPUT_KEY_DOWN) ? KeyPress : KeyRelease;
+        xev.xkey.display = dpy;
+        xev.xkey.window = focused;
+        xev.xkey.root = root;
+        xev.xkey.time = CurrentTime;
+        xev.xkey.keycode = kc;
+        xev.xkey.state = mods_to_x11(ev->mods);
+        xev.xkey.same_screen = True;
 
-            long mask = (ev->type == INPUT_KEY_DOWN) ? KeyPressMask : KeyReleaseMask;
-            XSendEvent(dpy, focused, True, mask, &xev);
-        }
+        long mask = (ev->type == INPUT_KEY_DOWN) ? KeyPressMask : KeyReleaseMask;
+        XSendEvent(dpy, focused, True, mask, &xev);
         break;
     }
     case INPUT_MOTION: {
