@@ -48,6 +48,18 @@ static int           g_recv_edge_armed;
 static uint64_t      g_edge_cooldown_until;
 
 /* keysyms for the WM mod key — determined per WM type */
+static void release_all_modifiers(void)
+{
+    static const uint32_t keysyms[] = {
+        0xffe1, 0xffe2, 0xffe3, 0xffe4,
+        0xffe9, 0xffea, 0xffeb, 0xffec,
+    };
+    for (size_t i = 0; i < sizeof(keysyms)/sizeof(keysyms[0]); i++) {
+        input_event_t up = { .type = INPUT_KEY_UP, .keysym = keysyms[i] };
+        input_inject_event(&up);
+    }
+}
+
 /* mod mask bit for this machine's WM — used for focus interception */
 static uint32_t g_local_mod_bit;
 
@@ -375,6 +387,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
 
     case MSG_INPUT_STOP:
         LOG_INFO("input: %s stopped sending (%d events received)", p->name, g_input_ev_recv);
+        release_all_modifiers();
         g_input_mode = MODE_LOCAL;
         g_input_source = NULL;
         break;
@@ -436,6 +449,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                         fe.focus_enter.cursor_y = g_virt_y;
                         peer_send(target, &fe);
 
+                        release_all_modifiers();
                         g_input_mode = MODE_LOCAL;
                         g_input_source = NULL;
                         break;
@@ -489,6 +503,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                         fe.focus_enter.cursor_y = g_virt_y;
                         peer_send(target, &fe);
 
+                        release_all_modifiers();
                         g_input_mode = MODE_LOCAL;
                         g_input_source = NULL;
                         break;
