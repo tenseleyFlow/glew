@@ -70,9 +70,14 @@ static direction_t arrow_keysym_to_dir(uint32_t keysym)
 static void start_edge_watching(void);
 static void start_sending_input(peer_t *target, direction_t cross_dir);
 
+static uv_timer_t  g_sender_cooldown;
+static int         g_sender_cooldown_active;
+#define SENDER_COOLDOWN_MS 200
+
 static void on_mouse_edge(int dir, void *userdata)
 {
     (void)userdata;
+    if (g_sender_cooldown_active) return;
     direction_t d = (dir == 0) ? DIR_LEFT : DIR_RIGHT;
 
     int target_idx;
@@ -98,6 +103,13 @@ static void on_mouse_edge(int dir, void *userdata)
     start_sending_input(p, d);
 }
 
+static void on_sender_cooldown_expire(uv_timer_t *timer)
+{
+    (void)timer;
+    g_sender_cooldown_active = 0;
+    LOG_DBG("sender cooldown expired");
+}
+
 static void start_edge_watching(void)
 {
     if (g_input_mode == MODE_LOCAL)
@@ -119,6 +131,9 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
         g_input_mode = MODE_LOCAL;
         g_input_target = NULL;
         start_edge_watching();
+        g_sender_cooldown_active = 1;
+        uv_timer_start(&g_sender_cooldown, on_sender_cooldown_expire,
+                        SENDER_COOLDOWN_MS, 0);
         return;
     }
 
@@ -525,6 +540,7 @@ static void on_signal(uv_signal_t *handle, int signum)
 
     input_capture_shutdown();
     input_inject_shutdown();
+    uv_timer_stop(&g_sender_cooldown);
     peer_mgr_stop(&g_mgr);
     uv_signal_stop(&g_sigint);
     uv_signal_stop(&g_sigterm);
@@ -603,6 +619,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < g_mgr.peer_count; i++)
         g_mgr.peers[i].on_message = on_peer_message;
 
+    uv_timer_init(g_loop, &g_sender_cooldown);
     uv_signal_init(g_loop, &g_sigint);
     uv_signal_init(g_loop, &g_sigterm);
     uv_signal_start(&g_sigint, on_signal, SIGINT);
