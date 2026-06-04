@@ -50,7 +50,9 @@ void input_inject_event(const input_event_t *ev)
             UniChar ch = (UniChar)ev->keysym;
             CGEventKeyboardSetUnicodeString(e, 1, &ch);
         }
-        CGEventPost(kCGSessionEventTap, e);
+        /* inject at HID level so WM event taps (tarmac) see the events.
+         * private event source prevents system shortcut interference. */
+        CGEventPost(kCGHIDEventTap, e);
         CFRelease(e);
         break;
     }
