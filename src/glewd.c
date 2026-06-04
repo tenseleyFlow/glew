@@ -41,10 +41,9 @@ static double        g_virt_x, g_virt_y;
 static uint32_t      g_send_seq;
 static uint32_t      g_recv_seq;
 
-/* receiver-side mouse edge dwell */
-#define RECV_DWELL_MS 250
-static int           g_recv_edge_dir;    /* -1=none, 0=left, 1=right */
-static uint64_t      g_recv_edge_start;
+/* receiver-side mouse edge — arm/disarm guard (same model as sender) */
+static int           g_recv_edge_armed;
+#define RECV_COOLDOWN_MS 200
 
 /* cooldown: suppress edge checks briefly after entering a machine */
 static uint64_t      g_edge_cooldown_until;
@@ -359,8 +358,8 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         g_input_source = p;
         g_input_ev_recv = 0;
         g_recv_seq = msg->input_start.seq;
-        g_edge_cooldown_until = uv_now(g_loop) + 500;
-        g_recv_edge_dir = -1;
+        g_edge_cooldown_until = uv_now(g_loop) + RECV_COOLDOWN_MS;
+        g_recv_edge_armed = 0;
         break;
 
     case MSG_INPUT_STOP:
@@ -455,27 +454,19 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
             if (g_virt_y < 0.0) g_virt_y = 0.0;
             if (g_virt_y > 1.0) g_virt_y = 1.0;
 
-            /* check edge crossing with dwell */
-            uint64_t now = uv_now(g_loop);
-            int past_cooldown = (now >= g_edge_cooldown_until);
-            int cur_edge = -1;
-            if (past_cooldown) {
-                if (g_virt_x <= 0.001) cur_edge = 0;
-                else if (g_virt_x >= 0.999) cur_edge = 1;
-            }
+            /* arm when cursor is well inside the screen */
+            if (g_virt_x > 0.05 && g_virt_x < 0.95)
+                g_recv_edge_armed = 1;
 
-            if (cur_edge < 0) {
-                g_recv_edge_dir = -1;
-            } else if (cur_edge != g_recv_edge_dir) {
-                g_recv_edge_dir = cur_edge;
-                g_recv_edge_start = now;
-            }
-
+            /* check edge crossing (armed + past cooldown) */
             direction_t edge_dir = -1;
-            if (g_recv_edge_dir >= 0 && (now - g_recv_edge_start) >= RECV_DWELL_MS) {
-                edge_dir = (g_recv_edge_dir == 0) ? DIR_LEFT : DIR_RIGHT;
-                g_recv_edge_dir = -1;
+            if (g_recv_edge_armed && uv_now(g_loop) >= g_edge_cooldown_until) {
+                if (g_virt_x <= 0.001)      edge_dir = DIR_LEFT;
+                else if (g_virt_x >= 0.999) edge_dir = DIR_RIGHT;
             }
+
+            if ((int)edge_dir >= 0)
+                g_recv_edge_armed = 0;
 
             if ((int)edge_dir >= 0) {
                 int target_idx;
