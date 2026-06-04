@@ -109,6 +109,20 @@ static int gar_focus(const char *dir_str)
     return ok ? 0 : -1;
 }
 
+static int gar_focus_monitor(const char *target)
+{
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "target", target);
+
+    cJSON *resp = gar_request("focus_monitor", args);
+    if (!resp) return -1;
+
+    cJSON *success = cJSON_GetObjectItem(resp, "success");
+    int ok = success && cJSON_IsTrue(success);
+    cJSON_Delete(resp);
+    return ok ? 0 : -1;
+}
+
 static int get_focused_id(void)
 {
     cJSON *resp = gar_request("get_focused", NULL);
@@ -181,6 +195,15 @@ static int gar_drv_do_focus(direction_t dir)
 
 static int gar_drv_focus_edge(direction_t dir)
 {
+    const char *mon_dir = (dir == DIR_LEFT || dir == DIR_UP) ? "left" : "right";
+
+    /* first: navigate to the edge monitor */
+    for (int i = 0; i < 8; i++) {
+        if (gar_focus_monitor(mon_dir) != 0)
+            break;
+    }
+
+    /* then: navigate to the edge window within that monitor */
     int prev = get_focused_id();
     if (prev < 0) return -1;
 
