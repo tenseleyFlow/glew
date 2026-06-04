@@ -34,7 +34,6 @@ static peer_t       *g_input_target;   /* peer we're sending input to */
 static peer_t       *g_input_source;   /* peer sending input to us */
 static int           g_input_ev_sent;
 static int           g_input_ev_recv;
-static int           g_remote_mod_held; /* track mod key state during receiving */
 
 /* virtual cursor on receiving side [0,1] */
 static double        g_virt_x, g_virt_y;
@@ -392,18 +391,11 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         else if (ev.type == INPUT_KEY_UP)
             LOG_DBG("inject: KEY_UP keysym=0x%x", ev.keysym);
 
-        /* track mod key state */
-        if (is_mod_keysym(ev.keysym)) {
-            if (ev.type == INPUT_KEY_DOWN)
-                g_remote_mod_held = 1;
-            else if (ev.type == INPUT_KEY_UP)
-                g_remote_mod_held = 0;
-            input_inject_event(&ev);
-            break;
-        }
-
-        /* intercept mod+direction: route through WM driver */
-        if (g_remote_mod_held && ev.type == INPUT_KEY_DOWN) {
+        /* intercept mod+direction: route through WM driver.
+         * check mods field directly — the initial mod key-down may have
+         * occurred before the grab started and never been captured. */
+        int mod_held = (ev.mods & 0x08) || (ev.mods & 0x40); /* Alt or Super */
+        if (mod_held && ev.type == INPUT_KEY_DOWN) {
             direction_t dir = arrow_keysym_to_dir(ev.keysym);
             if ((int)dir >= 0) {
                 int can = g_driver->can_focus(dir);
@@ -433,7 +425,6 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
 
                             g_input_mode = MODE_LOCAL;
                             g_input_source = NULL;
-                            g_remote_mod_held = 0;
                         }
                     } else {
                         LOG_DBG("remote focus %s: at absolute edge", direction_str(dir));
@@ -489,7 +480,6 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
 
                         g_input_mode = MODE_LOCAL;
                         g_input_source = NULL;
-                        g_remote_mod_held = 0;
                         break;
                     }
                 }
