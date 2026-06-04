@@ -45,9 +45,16 @@ static unsigned int mods_to_x11(uint32_t mods)
     return state;
 }
 
-static int is_modifier_keysym(uint32_t ks)
+static int is_hold_modifier(uint32_t ks)
 {
-    return (ks >= 0xffe1 && ks <= 0xffee);
+    /* skip hold-type modifiers — their state is carried in the mods field.
+     * Caps_Lock (0xffe5) and Num_Lock (0xffe6) are toggles and must be injected. */
+    return ks == 0xffe1 || ks == 0xffe2 ||  /* Shift_L, Shift_R */
+           ks == 0xffe3 || ks == 0xffe4 ||  /* Control_L, Control_R */
+           ks == 0xffe7 || ks == 0xffe8 ||  /* Meta_L, Meta_R */
+           ks == 0xffe9 || ks == 0xffea ||  /* Alt_L, Alt_R */
+           ks == 0xffeb || ks == 0xffec ||  /* Super_L, Super_R */
+           ks == 0xffed || ks == 0xffee;    /* Hyper_L, Hyper_R */
 }
 
 void input_inject_event(const input_event_t *ev)
@@ -60,7 +67,7 @@ void input_inject_event(const input_event_t *ev)
         /* skip modifier-only key events — the modifier state is carried
          * in the mods field of actual key events, and separate modifier
          * KeyPress/KeyRelease confuses terminals on some X servers */
-        if (is_modifier_keysym(ev->keysym))
+        if (is_hold_modifier(ev->keysym))
             break;
 
         KeyCode kc = XKeysymToKeycode(dpy, ev->keysym);
