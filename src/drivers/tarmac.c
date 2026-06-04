@@ -193,9 +193,9 @@ static int tarmac_drv_dispatch_hotkey(uint32_t keysym, uint32_t mods)
 {
     (void)mods;
 
-    /* mod + Return → spawn terminal */
+    /* mod + Return → spawn terminal (requires tarmac IPC "spawn-terminal") */
     if (keysym == 0xff0d)
-        return tarmac_command("exec", "open -na Ghostty") == 0;
+        return tarmac_command("spawn-terminal", NULL) == 0;
 
     /* mod + q → close */
     if (keysym == 'q')
