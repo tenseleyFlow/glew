@@ -45,23 +45,12 @@ static int gar_connect(void)
 
 /* ── IPC protocol (newline-delimited JSON, gar native) ──────────── */
 
-static cJSON *gar_request_once(const char *command, cJSON *args)
+static cJSON *gar_send_and_recv(const char *json_str)
 {
-    cJSON *req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "command", command);
-    if (args)
-        cJSON_AddItemToObject(req, "args", args);
-    else
-        cJSON_AddItemToObject(req, "args", cJSON_CreateObject());
-
-    char *json = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
-
-    size_t len = strlen(json);
-    ssize_t w = write(sock_fd, json, len);
+    size_t len = strlen(json_str);
+    ssize_t w = write(sock_fd, json_str, len);
     if (w == (ssize_t)len)
         w = write(sock_fd, "\n", 1);
-    free(json);
 
     if (w <= 0)
         return NULL;
@@ -83,16 +72,31 @@ static cJSON *gar_request_once(const char *command, cJSON *args)
 
 static cJSON *gar_request(const char *command, cJSON *args)
 {
-    cJSON *resp = gar_request_once(command, args);
-    if (resp)
+    cJSON *req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "command", command);
+    if (args)
+        cJSON_AddItemToObject(req, "args", args);
+    else
+        cJSON_AddItemToObject(req, "args", cJSON_CreateObject());
+
+    char *json = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+
+    cJSON *resp = gar_send_and_recv(json);
+    if (resp) {
+        free(json);
         return resp;
+    }
 
     LOG_WARN("gar: request failed, reconnecting");
-    if (gar_connect() != 0)
+    if (gar_connect() != 0) {
+        free(json);
         return NULL;
+    }
 
-    /* rebuild args since gar_request_once consumed them via cJSON_Delete(req) */
-    return gar_request_once(command, args);
+    resp = gar_send_and_recv(json);
+    free(json);
+    return resp;
 }
 
 static int gar_focus(const char *dir_str)
@@ -219,10 +223,18 @@ static int gar_drv_focus_edge(direction_t dir)
 
 static int gar_drv_dispatch_action(const char *action)
 {
-    if (strcmp(action, "close") == 0)
-        return gar_focus("close") == 0 ? 0 : -1;
-    if (strcmp(action, "equalize") == 0)
-        return gar_focus("equalize") == 0 ? 0 : -1;
+    if (strcmp(action, "close") == 0) {
+        cJSON *resp = gar_request("close", NULL);
+        if (!resp) return -1;
+        cJSON_Delete(resp);
+        return 0;
+    }
+    if (strcmp(action, "equalize") == 0) {
+        cJSON *resp = gar_request("equalize", NULL);
+        if (!resp) return -1;
+        cJSON_Delete(resp);
+        return 0;
+    }
     if (strcmp(action, "toggle-floating") == 0) {
         cJSON *resp = gar_request("toggle_floating", NULL);
         if (!resp) return -1;
