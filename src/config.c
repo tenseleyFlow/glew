@@ -116,8 +116,6 @@ int config_load(const char *path, glew_config_t *cfg)
         copy_str(cfg->escape_key, sizeof(cfg->escape_key),
                  toml_string_in(input, "escape_key"));
 
-    toml_free(root);
-
     /* parse [actions] table */
     toml_table_t *actions = toml_table_in(root, "actions");
     if (actions) {
@@ -161,6 +159,8 @@ int config_load(const char *path, glew_config_t *cfg)
             cfg->action_count++;
         }
     }
+
+    toml_free(root);
 
     if (!cfg->self_name[0]) {
         LOG_ERR("config missing [self].name");
