@@ -248,6 +248,17 @@ static int gar_drv_dispatch_action(const char *action)
         return 0;
     }
 
+    /* "move left|right|up|down" or "swap left|right|up|down" */
+    if (strncmp(action, "move ", 5) == 0 || strncmp(action, "swap ", 5) == 0) {
+        const char *dir_str = action + (action[0] == 'm' ? 5 : 5);
+        cJSON *args = cJSON_CreateObject();
+        cJSON_AddStringToObject(args, "direction", dir_str);
+        cJSON *resp = gar_request("swap", args);
+        if (!resp) return -1;
+        cJSON_Delete(resp);
+        return 0;
+    }
+
     /* "move-to-workspace N" */
     if (strncmp(action, "move-to-workspace ", 18) == 0) {
         int n = atoi(action + 18);

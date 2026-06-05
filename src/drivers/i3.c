@@ -566,6 +566,13 @@ static int i3_drv_dispatch_action(const char *action)
     if (strcmp(action, "reload") == 0)
         return i3_command("reload");
 
+    /* "move left|right|up|down" or "swap ..." → i3 "move left|right|up|down" */
+    if (strncmp(action, "move ", 5) == 0 || strncmp(action, "swap ", 5) == 0) {
+        char cmd[64];
+        snprintf(cmd, sizeof(cmd), "move %s", action + (action[0] == 'm' ? 5 : 5));
+        return i3_command(cmd);
+    }
+
     /* "workspace N" → i3 "workspace N" (same syntax) */
     if (strncmp(action, "workspace ", 10) == 0) {
         char cmd[64];

@@ -202,6 +202,13 @@ static int tarmac_drv_dispatch_action(const char *action)
     if (strcmp(action, "toggle-floating") == 0)
         return tarmac_command("toggle-floating", NULL);
 
+    /* "move left|right|up|down" or "swap ..." */
+    if (strncmp(action, "move ", 5) == 0) {
+        return tarmac_command("swap", action + 5);
+    }
+    if (strncmp(action, "swap ", 5) == 0)
+        return tarmac_command("swap", action + 5);
+
     /* "workspace N" */
     if (strncmp(action, "workspace ", 10) == 0)
         return tarmac_command("workspace", action + 10);
