@@ -34,6 +34,7 @@ void input_capture_shutdown(void);
 /* ── Cursor/modifier query ──────────────────────────────────────── */
 
 double input_get_cursor_y(void);
+void   input_get_cursor_pos(double *x, double *y);
 uint32_t input_get_mod_mask(void);
 
 /* ── Injection (receives events, injects locally) ───────────────── */

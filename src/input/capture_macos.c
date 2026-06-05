@@ -232,6 +232,15 @@ void input_capture_shutdown(void)
     close(pipe_fds[1]);
 }
 
+void input_get_cursor_pos(double *x, double *y)
+{
+    CGEventRef event = CGEventCreate(NULL);
+    CGPoint loc = CGEventGetLocation(event);
+    CFRelease(event);
+    *x = (double)loc.x / screen_w;
+    *y = (double)loc.y / screen_h;
+}
+
 double input_get_cursor_y(void)
 {
     CGEventRef event = CGEventCreate(NULL);

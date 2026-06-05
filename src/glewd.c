@@ -419,6 +419,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                         g_driver->do_focus(dir);
                         LOG_DBG("remote focus %s: moved within %s",
                                 direction_str(dir), g_driver->name);
+                        input_get_cursor_pos(&g_virt_x, &g_virt_y);
                         g_mouse_suppress_until = uv_now(g_loop) + 250;
                         break;
                     }
@@ -451,6 +452,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                            g_driver->dispatch_action(action) == 0) {
                     LOG_DBG("remote action: '%s' dispatched via %s",
                             action, g_driver->name);
+                    input_get_cursor_pos(&g_virt_x, &g_virt_y);
                     g_mouse_suppress_until = uv_now(g_loop) + 250;
                     break;
                 }

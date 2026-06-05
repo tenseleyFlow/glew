@@ -300,6 +300,19 @@ void input_capture_stop(void)
     LOG_INFO("x11 capture: grab released (cursor restored to %d,%d)", rx, ry);
 }
 
+void input_get_cursor_pos(double *x, double *y)
+{
+    *x = 0.5; *y = 0.5;
+    if (!dpy) return;
+    Window rr, cr;
+    int rx, ry, wx, wy;
+    unsigned int mask;
+    if (!XQueryPointer(dpy, root, &rr, &cr, &rx, &ry, &wx, &wy, &mask))
+        return;
+    *x = (double)rx / screen_w;
+    *y = (double)ry / screen_h;
+}
+
 double input_get_cursor_y(void)
 {
     if (!dpy) return 0.5;
