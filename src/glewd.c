@@ -83,6 +83,7 @@ static int         g_sender_cooldown_active;
 static void on_mouse_edge(int dir, void *userdata)
 {
     (void)userdata;
+    if (g_input_mode != MODE_LOCAL) return;
     if (g_sender_cooldown_active) return;
     direction_t d = (dir == 0) ? DIR_LEFT : DIR_RIGHT;
 
@@ -343,6 +344,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         /* normal incoming focus — set virtual cursor at entry edge */
         LOG_INFO("focus entering from %s (source: %s)",
                  msg->focus_enter.from_direction, msg->focus_enter.source);
+        input_edge_watch_stop();
 
         double cy = msg->focus_enter.cursor_y;
         if (cy < 0.0 || cy > 1.0) cy = 0.5;
@@ -366,6 +368,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
 
     case MSG_INPUT_START:
         LOG_INFO("input: receiving from %s (seq=%u)", msg->input_start.source, msg->input_start.seq);
+        input_edge_watch_stop();
         g_input_mode = MODE_REMOTE_RECEIVING;
         g_input_source = p;
         g_input_ev_recv = 0;
@@ -379,6 +382,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         release_all_modifiers();
         g_input_mode = MODE_LOCAL;
         g_input_source = NULL;
+        start_edge_watching();
         break;
 
     case MSG_INPUT: {
