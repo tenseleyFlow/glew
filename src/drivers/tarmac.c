@@ -189,33 +189,28 @@ static int tarmac_drv_focus_edge(direction_t dir)
     return 0;
 }
 
-static int tarmac_drv_dispatch_hotkey(uint32_t keysym, uint32_t mods)
+static int tarmac_drv_dispatch_action(const char *action)
 {
-    (void)mods;
+    if (strcmp(action, "close") == 0)
+        return tarmac_command("close", NULL);
+    if (strcmp(action, "equalize") == 0)
+        return tarmac_command("equalize", NULL);
+    if (strcmp(action, "reload") == 0)
+        return tarmac_command("reload", NULL);
+    if (strcmp(action, "spawn-terminal") == 0)
+        return tarmac_command("spawn-terminal", NULL);
+    if (strcmp(action, "toggle-floating") == 0)
+        return tarmac_command("toggle-floating", NULL);
 
-    /* mod + Return → spawn terminal (requires tarmac IPC "spawn-terminal") */
-    if (keysym == 0xff0d)
-        return tarmac_command("spawn-terminal", NULL) == 0;
+    /* "workspace N" */
+    if (strncmp(action, "workspace ", 10) == 0)
+        return tarmac_command("workspace", action + 10);
 
-    /* mod + q → close */
-    if (keysym == 'q')
-        return tarmac_command("close", NULL) == 0;
+    /* "move-to-workspace N" */
+    if (strncmp(action, "move-to-workspace ", 18) == 0)
+        return tarmac_command("move-to-workspace", action + 18);
 
-    /* mod + e → equalize */
-    if (keysym == 'e')
-        return tarmac_command("equalize", NULL) == 0;
-
-    /* mod + 1-9 → workspace 1-9 */
-    if (keysym >= '1' && keysym <= '9') {
-        char num[2] = { (char)keysym, '\0' };
-        return tarmac_command("workspace", num) == 0;
-    }
-
-    /* mod + 0 → workspace 10 */
-    if (keysym == '0')
-        return tarmac_command("workspace", "10") == 0;
-
-    return 0;
+    return -1;
 }
 
 const wm_driver_t tarmac_driver = {
@@ -225,5 +220,5 @@ const wm_driver_t tarmac_driver = {
     .can_focus        = tarmac_drv_can_focus,
     .do_focus         = tarmac_drv_do_focus,
     .focus_edge       = tarmac_drv_focus_edge,
-    .dispatch_hotkey  = tarmac_drv_dispatch_hotkey,
+    .dispatch_action  = tarmac_drv_dispatch_action,
 };

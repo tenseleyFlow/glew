@@ -26,10 +26,9 @@ typedef struct wm_driver {
      * e.g., focus_edge(DIR_RIGHT) focuses the rightmost window. */
     int  (*focus_edge)(direction_t dir);
 
-    /* Route a mod+key combo through the WM's IPC instead of raw injection.
-     * Returns 1 if handled (caller should not inject), 0 if not handled.
-     * NULL means "never handles hotkeys" (same as always returning 0). */
-    int  (*dispatch_hotkey)(uint32_t keysym, uint32_t mods);
+    /* Dispatch a WM-agnostic action (e.g. "workspace 1", "close", "spawn-terminal").
+     * Returns 0 on success, -1 if unsupported. NULL = no dispatch support. */
+    int  (*dispatch_action)(const char *action);
 } wm_driver_t;
 
 const char *direction_str(direction_t dir);

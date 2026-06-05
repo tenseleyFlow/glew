@@ -557,11 +557,38 @@ static int i3_drv_focus_edge(direction_t dir)
     return i3_command(cmd);
 }
 
+static int i3_drv_dispatch_action(const char *action)
+{
+    if (strcmp(action, "spawn-terminal") == 0)
+        return i3_command("exec $TERMINAL");
+    if (strcmp(action, "close") == 0)
+        return i3_command("kill");
+    if (strcmp(action, "reload") == 0)
+        return i3_command("reload");
+
+    /* "workspace N" → i3 "workspace N" (same syntax) */
+    if (strncmp(action, "workspace ", 10) == 0) {
+        char cmd[64];
+        snprintf(cmd, sizeof(cmd), "workspace %s", action + 10);
+        return i3_command(cmd);
+    }
+
+    /* "move-to-workspace N" → i3 "move container to workspace N" */
+    if (strncmp(action, "move-to-workspace ", 18) == 0) {
+        char cmd[64];
+        snprintf(cmd, sizeof(cmd), "move container to workspace %s", action + 18);
+        return i3_command(cmd);
+    }
+
+    return -1;
+}
+
 const wm_driver_t i3_driver = {
-    .name       = "i3",
-    .init       = i3_drv_init,
-    .shutdown   = i3_drv_shutdown,
-    .can_focus  = i3_drv_can_focus,
-    .do_focus   = i3_drv_do_focus,
-    .focus_edge = i3_drv_focus_edge,
+    .name            = "i3",
+    .init            = i3_drv_init,
+    .shutdown        = i3_drv_shutdown,
+    .can_focus       = i3_drv_can_focus,
+    .do_focus        = i3_drv_do_focus,
+    .focus_edge      = i3_drv_focus_edge,
+    .dispatch_action = i3_drv_dispatch_action,
 };

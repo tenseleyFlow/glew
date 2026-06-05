@@ -217,11 +217,58 @@ static int gar_drv_focus_edge(direction_t dir)
     return 0;
 }
 
+static int gar_drv_dispatch_action(const char *action)
+{
+    if (strcmp(action, "close") == 0)
+        return gar_focus("close") == 0 ? 0 : -1;
+    if (strcmp(action, "equalize") == 0)
+        return gar_focus("equalize") == 0 ? 0 : -1;
+    if (strcmp(action, "reload") == 0) {
+        cJSON *resp = gar_request("reload", NULL);
+        if (!resp) return -1;
+        cJSON_Delete(resp);
+        return 0;
+    }
+    if (strcmp(action, "spawn-terminal") == 0) {
+        cJSON *resp = gar_request("spawn-terminal", NULL);
+        if (!resp) return -1;
+        cJSON_Delete(resp);
+        return 0;
+    }
+
+    /* "workspace N" */
+    if (strncmp(action, "workspace ", 10) == 0) {
+        int n = atoi(action + 10);
+        if (n < 1) return -1;
+        cJSON *args = cJSON_CreateObject();
+        cJSON_AddNumberToObject(args, "number", n);
+        cJSON *resp = gar_request("workspace", args);
+        if (!resp) return -1;
+        cJSON_Delete(resp);
+        return 0;
+    }
+
+    /* "move-to-workspace N" */
+    if (strncmp(action, "move-to-workspace ", 18) == 0) {
+        int n = atoi(action + 18);
+        if (n < 1) return -1;
+        cJSON *args = cJSON_CreateObject();
+        cJSON_AddNumberToObject(args, "number", n);
+        cJSON *resp = gar_request("move_to_workspace", args);
+        if (!resp) return -1;
+        cJSON_Delete(resp);
+        return 0;
+    }
+
+    return -1;
+}
+
 const wm_driver_t gar_driver = {
-    .name       = "gar",
-    .init       = gar_drv_init,
-    .shutdown   = gar_drv_shutdown,
-    .can_focus  = gar_drv_can_focus,
-    .do_focus   = gar_drv_do_focus,
-    .focus_edge = gar_drv_focus_edge,
+    .name            = "gar",
+    .init            = gar_drv_init,
+    .shutdown        = gar_drv_shutdown,
+    .can_focus       = gar_drv_can_focus,
+    .do_focus        = gar_drv_do_focus,
+    .focus_edge      = gar_drv_focus_edge,
+    .dispatch_action = gar_drv_dispatch_action,
 };

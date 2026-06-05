@@ -2,8 +2,9 @@
 # Place at ~/.config/glew/glew.toml
 
 [self]
-name = "dorado"       # hostname of this machine
-wm = "i3"             # window manager: "i3" | "tarmac" | "gar"
+name = "dorado"           # hostname of this machine
+wm = "i3"                 # window manager: "i3" | "tarmac" | "gar" | "sway" | "hyprland"
+mod_key = "super"         # WM mod key: "super" | "alt"
 
 # Machines listed left-to-right. Monitors within each machine listed left-to-right.
 [layout]
@@ -29,3 +30,40 @@ secret = "changeme"                     # shared secret for peer auth
 
 [input]
 escape_key = "Scroll_Lock"             # key to return focus to local machine
+
+# mod + key → action mappings
+# "mod" is whatever mod_key is set to above
+# focus actions trigger edge-crossing when at the WM boundary
+[actions]
+left = "focus left"
+right = "focus right"
+up = "focus up"
+down = "focus down"
+h = "focus left"
+j = "focus down"
+k = "focus up"
+l = "focus right"
+return = "spawn-terminal"
+q = "close"
+e = "equalize"
+1 = "workspace 1"
+2 = "workspace 2"
+3 = "workspace 3"
+4 = "workspace 4"
+5 = "workspace 5"
+6 = "workspace 6"
+7 = "workspace 7"
+8 = "workspace 8"
+9 = "workspace 9"
+0 = "workspace 10"
+"shift+1" = "move-to-workspace 1"
+"shift+2" = "move-to-workspace 2"
+"shift+3" = "move-to-workspace 3"
+"shift+4" = "move-to-workspace 4"
+"shift+5" = "move-to-workspace 5"
+"shift+6" = "move-to-workspace 6"
+"shift+7" = "move-to-workspace 7"
+"shift+8" = "move-to-workspace 8"
+"shift+9" = "move-to-workspace 9"
+"shift+0" = "move-to-workspace 10"
+"shift+r" = "reload"

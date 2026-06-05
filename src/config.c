@@ -94,6 +94,8 @@ int config_load(const char *path, glew_config_t *cfg)
                  toml_string_in(self, "name"));
         copy_str(cfg->self_wm, sizeof(cfg->self_wm),
                  toml_string_in(self, "wm"));
+        copy_str(cfg->mod_key, sizeof(cfg->mod_key),
+                 toml_string_in(self, "mod_key"));
     }
 
     toml_table_t *layout = toml_table_in(root, "layout");
@@ -116,21 +118,86 @@ int config_load(const char *path, glew_config_t *cfg)
 
     toml_free(root);
 
+    /* parse [actions] table */
+    toml_table_t *actions = toml_table_in(root, "actions");
+    if (actions) {
+        int n = toml_table_ntab(actions) + toml_table_nkval(actions);
+        if (n > GLEW_MAX_ACTIONS)
+            n = GLEW_MAX_ACTIONS;
+
+        for (int i = 0; ; i++) {
+            const char *key = toml_key_in(actions, i);
+            if (!key) break;
+            if (cfg->action_count >= GLEW_MAX_ACTIONS) break;
+
+            toml_datum_t val = toml_string_in(actions, key);
+            if (!val.ok) continue;
+
+            action_binding_t *ab = &cfg->actions[cfg->action_count];
+            ab->shift = 0;
+
+            const char *kname = key;
+            if (strncmp(key, "shift+", 6) == 0) {
+                ab->shift = 1;
+                kname = key + 6;
+            }
+
+            /* convert key name to keysym */
+            if (strcmp(kname, "return") == 0)       ab->keysym = 0xff0d;
+            else if (strcmp(kname, "space") == 0)    ab->keysym = 0x0020;
+            else if (strcmp(kname, "tab") == 0)      ab->keysym = 0xff09;
+            else if (strcmp(kname, "escape") == 0)   ab->keysym = 0xff1b;
+            else if (strcmp(kname, "backspace") == 0) ab->keysym = 0xff08;
+            else if (strcmp(kname, "delete") == 0)   ab->keysym = 0xffff;
+            else if (strcmp(kname, "left") == 0)     ab->keysym = 0xff51;
+            else if (strcmp(kname, "up") == 0)       ab->keysym = 0xff52;
+            else if (strcmp(kname, "right") == 0)    ab->keysym = 0xff53;
+            else if (strcmp(kname, "down") == 0)     ab->keysym = 0xff54;
+            else if (strlen(kname) == 1)             ab->keysym = (uint32_t)kname[0];
+            else { free(val.u.s); continue; }
+
+            snprintf(ab->action, sizeof(ab->action), "%s", val.u.s);
+            free(val.u.s);
+            cfg->action_count++;
+        }
+    }
+
     if (!cfg->self_name[0]) {
         LOG_ERR("config missing [self].name");
         return -1;
     }
 
-    LOG_INFO("config loaded: self=%s wm=%s machines=%d port=%d",
-             cfg->self_name, cfg->self_wm, cfg->machine_count, cfg->port);
+    if (!cfg->mod_key[0])
+        snprintf(cfg->mod_key, sizeof(cfg->mod_key), "super");
+
+    LOG_INFO("config loaded: self=%s wm=%s mod=%s machines=%d actions=%d port=%d",
+             cfg->self_name, cfg->self_wm, cfg->mod_key,
+             cfg->machine_count, cfg->action_count, cfg->port);
     return 0;
+}
+
+const char *config_find_action(const glew_config_t *cfg, uint32_t keysym, int shift)
+{
+    for (int i = 0; i < cfg->action_count; i++) {
+        if (cfg->actions[i].keysym == keysym && cfg->actions[i].shift == shift)
+            return cfg->actions[i].action;
+    }
+    return NULL;
+}
+
+uint32_t config_mod_bit(const glew_config_t *cfg)
+{
+    if (strcmp(cfg->mod_key, "alt") == 0 || strcmp(cfg->mod_key, "option") == 0)
+        return (1 << 3);
+    return (1 << 6); /* super is default */
 }
 
 void config_dump(const glew_config_t *cfg)
 {
-    LOG_DBG("self: name=%s wm=%s", cfg->self_name, cfg->self_wm);
+    LOG_DBG("self: name=%s wm=%s mod=%s", cfg->self_name, cfg->self_wm, cfg->mod_key);
     LOG_DBG("network: port=%d", cfg->port);
     LOG_DBG("input: escape=%s", cfg->escape_key);
+    LOG_DBG("actions: %d bindings", cfg->action_count);
 
     for (int i = 0; i < cfg->machine_count; i++) {
         const machine_t *m = &cfg->machines[i];

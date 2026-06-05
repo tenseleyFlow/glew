@@ -60,28 +60,13 @@ static void release_all_modifiers(void)
     }
 }
 
-/* mod mask bit for this machine's WM — used for focus interception */
-static uint32_t g_local_mod_bit;
-
-static void init_local_mod(void)
+static direction_t parse_focus_dir(const char *action)
 {
-    const char *wm = g_cfg.self_wm;
-    if (strcmp(wm, "tarmac") == 0) {
-        g_local_mod_bit = (1 << 3); /* Alt/Option */
-    } else {
-        g_local_mod_bit = (1 << 6); /* Super — i3, gar, sway */
-    }
-}
-
-static direction_t arrow_keysym_to_dir(uint32_t keysym)
-{
-    switch (keysym) {
-    case 0xff51: return DIR_LEFT;
-    case 0xff52: return DIR_UP;
-    case 0xff53: return DIR_RIGHT;
-    case 0xff54: return DIR_DOWN;
-    default:     return -1;
-    }
+    if (strcmp(action, "focus left") == 0)  return DIR_LEFT;
+    if (strcmp(action, "focus right") == 0) return DIR_RIGHT;
+    if (strcmp(action, "focus up") == 0)    return DIR_UP;
+    if (strcmp(action, "focus down") == 0)  return DIR_DOWN;
+    return -1;
 }
 
 static void start_edge_watching(void);
@@ -416,51 +401,53 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         else if (ev.type == INPUT_KEY_UP)
             LOG_DBG("inject: KEY_UP keysym=0x%x", ev.keysym);
 
-        /* intercept mod+direction: route through local WM driver.
-         * check mods field — only intercept the LOCAL WM's mod key,
-         * not all modifiers (alt+arrow for terminal word jump must pass through) */
-        int mod_held = (ev.mods & g_local_mod_bit);
-        if (mod_held && ev.type == INPUT_KEY_DOWN) {
-            direction_t dir = arrow_keysym_to_dir(ev.keysym);
-            if ((int)dir >= 0) {
-                int can = g_driver->can_focus(dir);
-                if (can) {
-                    g_driver->do_focus(dir);
-                    LOG_DBG("remote focus %s: moved within %s",
-                            direction_str(dir), g_driver->name);
-                    break;
-                }
-                /* at WM edge — try cross to neighbor */
-                int target_idx;
-                direction_t enter_dir;
-                if (layout_resolve(&g_layout, dir, &target_idx, &enter_dir) == 0) {
-                    peer_t *target = peer_by_index(&g_mgr, target_idx);
-                    if (target && target->state == PEER_CONNECTED) {
-                        LOG_INFO("focus %s: crossing to %s",
-                                 direction_str(dir), target->name);
-
-                        glew_msg_t fe = { .type = MSG_FOCUS_ENTER };
-                        snprintf(fe.focus_enter.from_direction,
-                                 sizeof(fe.focus_enter.from_direction),
-                                 "%s", direction_str(enter_dir));
-                        snprintf(fe.focus_enter.source,
-                                 sizeof(fe.focus_enter.source),
-                                 "%s", g_cfg.self_name);
-                        fe.focus_enter.cursor_y = g_virt_y;
-                        peer_send(target, &fe);
-
-                        release_all_modifiers();
-                        g_input_mode = MODE_LOCAL;
-                        g_input_source = NULL;
+        /* config-driven action dispatch: check if mod+key maps to an action */
+        uint32_t mod_bit = config_mod_bit(&g_cfg);
+        if ((ev.mods & mod_bit) && ev.type == INPUT_KEY_DOWN) {
+            int shift = (ev.mods & (1 << 0));
+            const char *action = config_find_action(&g_cfg, ev.keysym, shift);
+            if (action) {
+                direction_t dir = parse_focus_dir(action);
+                if ((int)dir >= 0) {
+                    /* focus action — route through WM with edge crossing */
+                    int can = g_driver->can_focus(dir);
+                    if (can) {
+                        g_driver->do_focus(dir);
+                        LOG_DBG("remote focus %s: moved within %s",
+                                direction_str(dir), g_driver->name);
                         break;
                     }
+                    int target_idx;
+                    direction_t enter_dir;
+                    if (layout_resolve(&g_layout, dir, &target_idx, &enter_dir) == 0) {
+                        peer_t *target = peer_by_index(&g_mgr, target_idx);
+                        if (target && target->state == PEER_CONNECTED) {
+                            LOG_INFO("focus %s: crossing to %s",
+                                     direction_str(dir), target->name);
+
+                            glew_msg_t fe = { .type = MSG_FOCUS_ENTER };
+                            snprintf(fe.focus_enter.from_direction,
+                                     sizeof(fe.focus_enter.from_direction),
+                                     "%s", direction_str(enter_dir));
+                            snprintf(fe.focus_enter.source,
+                                     sizeof(fe.focus_enter.source),
+                                     "%s", g_cfg.self_name);
+                            fe.focus_enter.cursor_y = g_virt_y;
+                            peer_send(target, &fe);
+
+                            release_all_modifiers();
+                            g_input_mode = MODE_LOCAL;
+                            g_input_source = NULL;
+                            break;
+                        }
+                    }
+                    /* no neighbor — fall through to inject */
+                } else if (g_driver->dispatch_action &&
+                           g_driver->dispatch_action(action) == 0) {
+                    LOG_DBG("remote action: '%s' dispatched via %s",
+                            action, g_driver->name);
+                    break;
                 }
-                /* no neighbor — fall through to inject */
-            } else if (g_driver->dispatch_hotkey &&
-                       g_driver->dispatch_hotkey(ev.keysym, ev.mods)) {
-                LOG_DBG("remote hotkey: keysym=0x%x dispatched via %s",
-                        ev.keysym, g_driver->name);
-                break;
             }
         }
 
@@ -611,7 +598,6 @@ int main(int argc, char **argv)
     if (g_driver->init(NULL) != 0)
         return 1;
 
-    init_local_mod();
     g_loop = uv_default_loop();
 
     /* init input subsystems */
