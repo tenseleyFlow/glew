@@ -19,7 +19,7 @@ typedef struct {
 
 typedef struct {
     uint32_t keysym;
-    int      shift;
+    uint32_t extra_mods;  /* modifiers beyond mod_key: shift=bit0, ctrl=bit2 */
     char     action[128];
 } action_binding_t;
 
@@ -45,8 +45,10 @@ typedef struct {
     int              action_count;
 } glew_config_t;
 
-/* look up an action for a keysym + shift state. returns NULL if no match. */
-const char *config_find_action(const glew_config_t *cfg, uint32_t keysym, int shift);
+/* look up an action for a keysym + extra modifiers (beyond mod_key).
+ * returns NULL if no match. */
+const char *config_find_action(const glew_config_t *cfg, uint32_t keysym,
+                               uint32_t extra_mods);
 
 /* convert mod_key string ("super", "alt") to a bitmask for mods field comparison */
 uint32_t config_mod_bit(const glew_config_t *cfg);

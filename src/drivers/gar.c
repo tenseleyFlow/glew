@@ -277,6 +277,16 @@ static int gar_drv_dispatch_action(const char *action)
         return 0;
     }
 
+    /* "resize left|right|up|down" */
+    if (strncmp(action, "resize ", 7) == 0) {
+        cJSON *args = cJSON_CreateObject();
+        cJSON_AddStringToObject(args, "direction", action + 7);
+        cJSON *resp = gar_request("resize", args);
+        if (!resp) return -1;
+        cJSON_Delete(resp);
+        return 0;
+    }
+
     /* "move left|right|up|down" or "swap left|right|up|down" */
     if (strncmp(action, "move ", 5) == 0 || strncmp(action, "swap ", 5) == 0) {
         const char *dir_str = action + (action[0] == 'm' ? 5 : 5);

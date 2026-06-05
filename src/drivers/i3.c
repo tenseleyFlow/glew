@@ -573,6 +573,20 @@ static int i3_drv_dispatch_action(const char *action)
     if (strcmp(action, "reload") == 0)
         return i3_command("reload");
 
+    /* "resize left|right|up|down" → i3 "resize shrink/grow width/height" */
+    if (strncmp(action, "resize ", 7) == 0) {
+        const char *dir = action + 7;
+        const char *dimension = "width";
+        const char *verb = "grow";
+        if (strcmp(dir, "left") == 0)       { dimension = "width";  verb = "shrink"; }
+        else if (strcmp(dir, "right") == 0) { dimension = "width";  verb = "grow"; }
+        else if (strcmp(dir, "up") == 0)    { dimension = "height"; verb = "shrink"; }
+        else if (strcmp(dir, "down") == 0)  { dimension = "height"; verb = "grow"; }
+        char cmd[64];
+        snprintf(cmd, sizeof(cmd), "resize %s %s 10 px or 5 ppt", verb, dimension);
+        return i3_command(cmd);
+    }
+
     /* "move left|right|up|down" or "swap ..." → i3 "move left|right|up|down" */
     if (strncmp(action, "move ", 5) == 0 || strncmp(action, "swap ", 5) == 0) {
         char cmd[64];

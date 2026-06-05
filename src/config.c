@@ -132,12 +132,22 @@ int config_load(const char *path, glew_config_t *cfg)
             if (!val.ok) continue;
 
             action_binding_t *ab = &cfg->actions[cfg->action_count];
-            ab->shift = 0;
+            ab->extra_mods = 0;
 
             const char *kname = key;
-            if (strncmp(key, "shift+", 6) == 0) {
-                ab->shift = 1;
-                kname = key + 6;
+            for (;;) {
+                if (strncmp(kname, "shift+", 6) == 0) {
+                    ab->extra_mods |= (1 << 0);
+                    kname += 6;
+                } else if (strncmp(kname, "ctrl+", 5) == 0) {
+                    ab->extra_mods |= (1 << 2);
+                    kname += 5;
+                } else if (strncmp(kname, "alt+", 4) == 0) {
+                    ab->extra_mods |= (1 << 3);
+                    kname += 4;
+                } else {
+                    break;
+                }
             }
 
             /* convert key name to keysym */
@@ -176,10 +186,12 @@ int config_load(const char *path, glew_config_t *cfg)
     return 0;
 }
 
-const char *config_find_action(const glew_config_t *cfg, uint32_t keysym, int shift)
+const char *config_find_action(const glew_config_t *cfg, uint32_t keysym,
+                               uint32_t extra_mods)
 {
     for (int i = 0; i < cfg->action_count; i++) {
-        if (cfg->actions[i].keysym == keysym && cfg->actions[i].shift == shift)
+        if (cfg->actions[i].keysym == keysym &&
+            cfg->actions[i].extra_mods == extra_mods)
             return cfg->actions[i].action;
     }
     return NULL;
@@ -199,8 +211,9 @@ void config_dump(const glew_config_t *cfg)
     LOG_DBG("input: escape=%s", cfg->escape_key);
     LOG_DBG("actions: %d bindings", cfg->action_count);
     for (int i = 0; i < cfg->action_count; i++)
-        LOG_DBG("  action[%d]: keysym=0x%x shift=%d → %s",
-                i, cfg->actions[i].keysym, cfg->actions[i].shift, cfg->actions[i].action);
+        LOG_DBG("  action[%d]: keysym=0x%x mods=0x%x → %s",
+                i, cfg->actions[i].keysym, cfg->actions[i].extra_mods,
+                cfg->actions[i].action);
 
     for (int i = 0; i < cfg->machine_count; i++) {
         const machine_t *m = &cfg->machines[i];
