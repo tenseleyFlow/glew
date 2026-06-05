@@ -44,6 +44,10 @@ static uint32_t      g_recv_seq;
 static int           g_recv_edge_armed;
 #define RECV_COOLDOWN_MS 200
 
+/* suppress mouse injection briefly after a focus action so the WM's
+ * mouse_follows_focus warp isn't immediately overridden */
+static uint64_t      g_mouse_suppress_until;
+
 /* cooldown: suppress edge checks briefly after entering a machine */
 static uint64_t      g_edge_cooldown_until;
 
@@ -415,6 +419,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                         g_driver->do_focus(dir);
                         LOG_DBG("remote focus %s: moved within %s",
                                 direction_str(dir), g_driver->name);
+                        g_mouse_suppress_until = uv_now(g_loop) + 250;
                         break;
                     }
                     int target_idx;
@@ -446,6 +451,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                            g_driver->dispatch_action(action) == 0) {
                     LOG_DBG("remote action: '%s' dispatched via %s",
                             action, g_driver->name);
+                    g_mouse_suppress_until = uv_now(g_loop) + 250;
                     break;
                 }
             }
@@ -453,6 +459,10 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
 
         /* motion: accumulate deltas into virtual cursor */
         if (ev.type == INPUT_MOTION) {
+            /* suppress mouse injection briefly after focus/action dispatch
+             * so the WM's mouse_follows_focus warp isn't overridden */
+            if (uv_now(g_loop) < g_mouse_suppress_until)
+                break;
             g_virt_x += ev.x;
             g_virt_y += ev.y;
 
