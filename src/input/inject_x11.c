@@ -39,6 +39,7 @@ static unsigned int mods_to_x11(uint32_t mods)
 {
     unsigned int state = 0;
     if (mods & (1 << 0)) state |= ShiftMask;
+    if (mods & (1 << 1)) state |= LockMask;
     if (mods & (1 << 2)) state |= ControlMask;
     if (mods & (1 << 3)) state |= Mod1Mask;
     if (mods & (1 << 6)) state |= Mod4Mask;

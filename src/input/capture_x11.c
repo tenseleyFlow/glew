@@ -36,6 +36,7 @@ static uint32_t x_mods_to_mask(unsigned int state)
 {
     uint32_t m = 0;
     if (state & ShiftMask)   m |= (1 << 0);
+    if (state & LockMask)    m |= (1 << 1);
     if (state & ControlMask) m |= (1 << 2);
     if (state & Mod1Mask)    m |= (1 << 3);
     if (state & Mod4Mask)    m |= (1 << 6);

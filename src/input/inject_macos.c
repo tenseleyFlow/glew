@@ -12,6 +12,27 @@ static int screen_w, screen_h;
 static int trusted;
 static CGEventSourceRef event_source;
 
+static int is_hold_modifier(uint32_t ks)
+{
+    return ks == 0xffe1 || ks == 0xffe2 ||  /* Shift_L, Shift_R */
+           ks == 0xffe3 || ks == 0xffe4 ||  /* Control_L, Control_R */
+           ks == 0xffe7 || ks == 0xffe8 ||  /* Meta_L, Meta_R */
+           ks == 0xffe9 || ks == 0xffea ||  /* Alt_L, Alt_R */
+           ks == 0xffeb || ks == 0xffec ||  /* Super_L, Super_R */
+           ks == 0xffed || ks == 0xffee;    /* Hyper_L, Hyper_R */
+}
+
+static CGEventFlags mods_to_cgflags(uint32_t mods)
+{
+    CGEventFlags f = 0;
+    if (mods & (1 << 0)) f |= kCGEventFlagMaskShift;
+    if (mods & (1 << 1)) f |= kCGEventFlagMaskAlphaShift;
+    if (mods & (1 << 2)) f |= kCGEventFlagMaskControl;
+    if (mods & (1 << 3)) f |= kCGEventFlagMaskAlternate;
+    if (mods & (1 << 6)) f |= kCGEventFlagMaskCommand;
+    return f;
+}
+
 int input_inject_init(void)
 {
     trusted = AXIsProcessTrusted();
@@ -39,19 +60,25 @@ void input_inject_event(const input_event_t *ev)
     switch (ev->type) {
     case INPUT_KEY_DOWN:
     case INPUT_KEY_UP: {
+        if (is_hold_modifier(ev->keysym))
+            break;
+
         CGKeyCode kc = keysym_to_macos_keycode(ev->keysym);
         if (kc == 0xFFFF) {
             LOG_DBG("inject: unknown keysym 0x%x, skipping", ev->keysym);
             break;
         }
         CGEventRef e = CGEventCreateKeyboardEvent(event_source, kc, ev->type == INPUT_KEY_DOWN);
-        /* set unicode character for printable ASCII keys */
+        CGEventSetFlags(e, mods_to_cgflags(ev->mods));
+
         if (ev->keysym >= 0x20 && ev->keysym <= 0x7e) {
             UniChar ch = (UniChar)ev->keysym;
+            int shifted = ((ev->mods & (1 << 0)) != 0) ^ ((ev->mods & (1 << 1)) != 0);
+            if (ch >= 'a' && ch <= 'z' && shifted)
+                ch -= 32;
             CGEventKeyboardSetUnicodeString(e, 1, &ch);
         }
-        /* inject at HID level so WM event taps (tarmac) see the events.
-         * private event source prevents system shortcut interference. */
+
         CGEventPost(kCGHIDEventTap, e);
         CFRelease(e);
         break;
