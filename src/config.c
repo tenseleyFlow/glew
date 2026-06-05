@@ -198,6 +198,9 @@ void config_dump(const glew_config_t *cfg)
     LOG_DBG("network: port=%d", cfg->port);
     LOG_DBG("input: escape=%s", cfg->escape_key);
     LOG_DBG("actions: %d bindings", cfg->action_count);
+    for (int i = 0; i < cfg->action_count; i++)
+        LOG_DBG("  action[%d]: keysym=0x%x shift=%d → %s",
+                i, cfg->actions[i].keysym, cfg->actions[i].shift, cfg->actions[i].action);
 
     for (int i = 0; i < cfg->machine_count; i++) {
         const machine_t *m = &cfg->machines[i];
