@@ -115,8 +115,12 @@ static void process_x_keys(void)
             continue;
         }
 
-        if (g_cb)
+        if (g_cb) {
             g_cb(&ie, g_userdata);
+            if (grabbing)
+                uv_timer_start(&safety_timer, on_safety_timeout,
+                               SAFETY_TIMEOUT_MS, 0);
+        }
     }
 }
 
@@ -147,8 +151,11 @@ static void on_poll_timer(uv_timer_t *handle)
     XWarpPointer(dpy, None, root, 0, 0, 0, 0, center_x, center_y);
     XFlush(dpy);
 
-    if (g_cb)
+    if (g_cb) {
         g_cb(&ie, g_userdata);
+        uv_timer_start(&safety_timer, on_safety_timeout,
+                        SAFETY_TIMEOUT_MS, 0);
+    }
 }
 
 /* ── Grab lifecycle ─────────────────────────────────────────────── */
