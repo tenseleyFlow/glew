@@ -223,14 +223,31 @@ static int gar_drv_dispatch_action(const char *action)
         return gar_focus("close") == 0 ? 0 : -1;
     if (strcmp(action, "equalize") == 0)
         return gar_focus("equalize") == 0 ? 0 : -1;
+    if (strcmp(action, "toggle-floating") == 0) {
+        cJSON *resp = gar_request("toggle_floating", NULL);
+        if (!resp) return -1;
+        cJSON_Delete(resp);
+        return 0;
+    }
     if (strcmp(action, "reload") == 0) {
         cJSON *resp = gar_request("reload", NULL);
         if (!resp) return -1;
         cJSON_Delete(resp);
         return 0;
     }
+    /* exec and spawn-terminal — route through gar's exec IPC */
+    if (strncmp(action, "exec ", 5) == 0) {
+        cJSON *args = cJSON_CreateObject();
+        cJSON_AddStringToObject(args, "command", action + 5);
+        cJSON *resp = gar_request("exec", args);
+        if (!resp) return -1;
+        cJSON_Delete(resp);
+        return 0;
+    }
     if (strcmp(action, "spawn-terminal") == 0) {
-        cJSON *resp = gar_request("spawn-terminal", NULL);
+        cJSON *args = cJSON_CreateObject();
+        cJSON_AddStringToObject(args, "command", "garterm");
+        cJSON *resp = gar_request("exec", args);
         if (!resp) return -1;
         cJSON_Delete(resp);
         return 0;

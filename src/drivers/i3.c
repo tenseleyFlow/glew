@@ -563,6 +563,13 @@ static int i3_drv_dispatch_action(const char *action)
         return i3_command("exec $TERMINAL");
     if (strcmp(action, "close") == 0)
         return i3_command("kill");
+    if (strcmp(action, "toggle-floating") == 0)
+        return i3_command("floating toggle");
+    if (strncmp(action, "exec ", 5) == 0) {
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "exec %s", action + 5);
+        return i3_command(cmd);
+    }
     if (strcmp(action, "reload") == 0)
         return i3_command("reload");
 
