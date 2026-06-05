@@ -409,9 +409,13 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         else if (ev.type == INPUT_KEY_UP)
             LOG_DBG("inject: KEY_UP keysym=0x%x", ev.keysym);
 
-        /* config-driven action dispatch: check if mod+key maps to an action */
+        /* config-driven action dispatch: check if mod+key maps to an action.
+         * skip if extra modifiers (ctrl/alt) are held — those are different WM binds */
         uint32_t mod_bit = config_mod_bit(&g_cfg);
         if ((ev.mods & mod_bit) && ev.type == INPUT_KEY_DOWN) {
+            uint32_t extra = ev.mods & ~mod_bit & ~(1 << 0);
+            if (extra)
+                goto inject;
             int shift = (ev.mods & (1 << 0));
             const char *action = config_find_action(&g_cfg, ev.keysym, shift);
             if (action) {
@@ -524,6 +528,7 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
             ev.y = g_virt_y;
         }
 
+    inject:
         input_inject_event(&ev);
         break;
     }
