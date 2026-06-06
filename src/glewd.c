@@ -524,6 +524,13 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
             ev.y = g_virt_y;
         }
 
+        /* button/scroll events also need the virtual cursor position */
+        if (ev.type == INPUT_BUTTON_DOWN || ev.type == INPUT_BUTTON_UP ||
+            ev.type == INPUT_SCROLL) {
+            ev.x = g_virt_x;
+            ev.y = g_virt_y;
+        }
+
         input_inject_event(&ev);
         break;
     }
