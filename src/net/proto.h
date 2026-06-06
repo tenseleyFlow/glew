@@ -54,6 +54,7 @@ typedef struct {
             int      scroll_x, scroll_y;
             uint32_t mods;
             uint32_t seq;
+            double   ts_ms;
         }                                                   input;
         struct { char direction[8]; }                       focus;
         struct { int crossed; char target[64]; }            focus_result;

@@ -13,6 +13,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <time.h>
 
 static glew_config_t      g_cfg;
 static layout_t           g_layout;
@@ -47,6 +48,17 @@ static int           g_recv_edge_armed;
 /* suppress mouse injection briefly after a focus action so the WM's
  * mouse_follows_focus warp isn't immediately overridden */
 static uint64_t      g_mouse_suppress_until;
+
+/* latency profiling */
+static double        g_lat_min, g_lat_max, g_lat_sum;
+static int           g_lat_count;
+
+static double now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+}
 
 /* cooldown: suppress edge checks briefly after entering a machine */
 static uint64_t      g_edge_cooldown_until;
@@ -168,6 +180,7 @@ static void on_captured_input(const input_event_t *ev, void *userdata)
     msg.input.scroll_y = ev->scroll_y;
     msg.input.mods = ev->mods;
     msg.input.seq = g_send_seq;
+    msg.input.ts_ms = now_ms();
     peer_send(g_input_target, &msg);
 }
 
@@ -379,6 +392,11 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
 
     case MSG_INPUT_STOP:
         LOG_INFO("input: %s stopped sending (%d events received)", p->name, g_input_ev_recv);
+        if (g_lat_count > 0)
+            LOG_INFO("latency: min=%.1fms avg=%.1fms max=%.1fms (n=%d)",
+                     g_lat_min, g_lat_sum / g_lat_count, g_lat_max, g_lat_count);
+        g_lat_min = g_lat_max = g_lat_sum = 0;
+        g_lat_count = 0;
         release_all_modifiers();
         g_input_mode = MODE_LOCAL;
         g_input_source = NULL;
@@ -402,6 +420,14 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
             .mods     = msg->input.mods,
         };
         g_input_ev_recv++;
+
+        if (msg->input.ts_ms > 0) {
+            double lat = now_ms() - msg->input.ts_ms;
+            if (g_lat_count == 0 || lat < g_lat_min) g_lat_min = lat;
+            if (lat > g_lat_max) g_lat_max = lat;
+            g_lat_sum += lat;
+            g_lat_count++;
+        }
 
         if (ev.type == INPUT_KEY_DOWN)
             LOG_DBG("inject: KEY_DN keysym=0x%x mods=0x%x", ev.keysym, ev.mods);

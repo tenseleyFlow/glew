@@ -81,6 +81,7 @@ size_t msg_serialize(const glew_msg_t *msg, char **out)
         cJSON_AddNumberToObject(json, "scroll_y", msg->input.scroll_y);
         cJSON_AddNumberToObject(json, "mods", msg->input.mods);
         cJSON_AddNumberToObject(json, "seq", msg->input.seq);
+        cJSON_AddNumberToObject(json, "ts", msg->input.ts_ms);
         break;
     case MSG_FOCUS:
         cJSON_AddStringToObject(json, "direction", msg->focus.direction);
@@ -171,6 +172,7 @@ int msg_parse(const char *data, size_t len, glew_msg_t *out)
         out->input.scroll_y = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(json, "scroll_y"));
         out->input.mods = (uint32_t)cJSON_GetNumberValue(cJSON_GetObjectItem(json, "mods"));
         out->input.seq = (uint32_t)cJSON_GetNumberValue(cJSON_GetObjectItem(json, "seq"));
+        out->input.ts_ms = cJSON_GetNumberValue(cJSON_GetObjectItem(json, "ts"));
         break;
     case MSG_FOCUS:
         copy_json_str(out->focus.direction, sizeof(out->focus.direction), json, "direction");
