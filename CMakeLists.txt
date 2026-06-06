@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(glew VERSION 0.1.0 LANGUAGES C)
+project(glew VERSION 0.1.0 LANGUAGES C OBJC)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -18,11 +18,13 @@ if(APPLE)
         src/input/capture_macos.c
         src/input/inject_macos.c
         src/input/keymap_macos.c
+        src/clipboard_macos.m
     )
     set(INPUT_LIBS
         "-framework CoreGraphics"
         "-framework ApplicationServices"
         "-framework CoreFoundation"
+        "-framework AppKit"
     )
 else()
     pkg_check_modules(X11 REQUIRED x11)
@@ -30,6 +32,7 @@ else()
     set(INPUT_SOURCES
         src/input/capture_x11.c
         src/input/inject_x11.c
+        src/clipboard_x11.c
     )
     set(INPUT_LIBS ${X11_LIBRARIES} ${XTST_LIBRARIES})
     set(INPUT_INCLUDE_DIRS ${X11_INCLUDE_DIRS} ${XTST_INCLUDE_DIRS})

@@ -16,6 +16,7 @@ static const char *type_str(msg_type_t t)
     case MSG_FOCUS_ACK:    return "focus_ack";
     case MSG_PING:         return "ping";
     case MSG_PONG:         return "pong";
+    case MSG_CLIPBOARD:    return "clipboard";
     case MSG_INPUT_START:  return "input_start";
     case MSG_INPUT_STOP:   return "input_stop";
     case MSG_INPUT:        return "input";
@@ -38,6 +39,7 @@ static msg_type_t type_from_str(const char *s)
     if (strcmp(s, "input") == 0)        return MSG_INPUT;
     if (strcmp(s, "ping") == 0)         return MSG_PING;
     if (strcmp(s, "pong") == 0)         return MSG_PONG;
+    if (strcmp(s, "clipboard") == 0)    return MSG_CLIPBOARD;
     if (strcmp(s, "focus") == 0)        return MSG_FOCUS;
     if (strcmp(s, "focus_result") == 0) return MSG_FOCUS_RESULT;
     return MSG_UNKNOWN;
@@ -82,6 +84,10 @@ size_t msg_serialize(const glew_msg_t *msg, char **out)
         cJSON_AddNumberToObject(json, "mods", msg->input.mods);
         cJSON_AddNumberToObject(json, "seq", msg->input.seq);
         cJSON_AddNumberToObject(json, "ts", msg->input.ts_ms);
+        break;
+    case MSG_CLIPBOARD:
+        if (msg->clipboard.text)
+            cJSON_AddStringToObject(json, "text", msg->clipboard.text);
         break;
     case MSG_FOCUS:
         cJSON_AddStringToObject(json, "direction", msg->focus.direction);
@@ -174,6 +180,20 @@ int msg_parse(const char *data, size_t len, glew_msg_t *out)
         out->input.seq = (uint32_t)cJSON_GetNumberValue(cJSON_GetObjectItem(json, "seq"));
         out->input.ts_ms = cJSON_GetNumberValue(cJSON_GetObjectItem(json, "ts"));
         break;
+    case MSG_CLIPBOARD: {
+        cJSON *t = cJSON_GetObjectItem(json, "text");
+        if (t && cJSON_IsString(t) && t->valuestring) {
+            size_t tlen = strlen(t->valuestring);
+            if (tlen <= 1024 * 1024) {
+                out->clipboard.text = malloc(tlen + 1);
+                if (out->clipboard.text) {
+                    memcpy(out->clipboard.text, t->valuestring, tlen + 1);
+                    out->clipboard.len = tlen;
+                }
+            }
+        }
+        break;
+    }
     case MSG_FOCUS:
         copy_json_str(out->focus.direction, sizeof(out->focus.direction), json, "direction");
         break;

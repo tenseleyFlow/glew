@@ -33,6 +33,7 @@ typedef enum {
     MSG_INPUT_START,
     MSG_INPUT_STOP,
     MSG_INPUT,
+    MSG_CLIPBOARD,
     /* local only */
     MSG_FOCUS,
     MSG_FOCUS_RESULT,
@@ -56,6 +57,7 @@ typedef struct {
             uint32_t seq;
             double   ts_ms;
         }                                                   input;
+        struct { char *text; size_t len; }                    clipboard;
         struct { char direction[8]; }                       focus;
         struct { int crossed; char target[64]; }            focus_result;
     };

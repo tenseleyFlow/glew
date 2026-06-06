@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <time.h>
+#include "clipboard.h"
 
 static glew_config_t      g_cfg;
 static layout_t           g_layout;
@@ -205,6 +206,26 @@ static void sync_modifiers(peer_t *target)
     }
 }
 
+static void send_clipboard_to(peer_t *target)
+{
+    char *text = clipboard_read();
+    if (!text) return;
+
+    size_t len = strlen(text);
+    if (len > 1024 * 1024) {
+        LOG_WARN("clipboard: content too large (%zu bytes), skipping", len);
+        free(text);
+        return;
+    }
+
+    glew_msg_t msg = { .type = MSG_CLIPBOARD };
+    msg.clipboard.text = text;
+    msg.clipboard.len = len;
+    peer_send(target, &msg);
+    LOG_DBG("clipboard: sent %zu bytes to %s", len, target->name);
+    free(text);
+}
+
 static void start_sending_input(peer_t *target, direction_t cross_dir)
 {
     g_input_mode = MODE_REMOTE_SENDING;
@@ -219,6 +240,7 @@ static void start_sending_input(peer_t *target, direction_t cross_dir)
     start.input_start.seq = g_send_seq;
     peer_send(target, &start);
 
+    send_clipboard_to(target);
     sync_modifiers(target);
 
     int edge_dir = (cross_dir == DIR_LEFT) ? 0 : (cross_dir == DIR_RIGHT) ? 1 : -1;
@@ -397,9 +419,19 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
                      g_lat_min, g_lat_sum / g_lat_count, g_lat_max, g_lat_count);
         g_lat_min = g_lat_max = g_lat_sum = 0;
         g_lat_count = 0;
+        send_clipboard_to(p);
         release_all_modifiers();
         g_input_mode = MODE_LOCAL;
         g_input_source = NULL;
+        break;
+
+    case MSG_CLIPBOARD:
+        if (msg->clipboard.text && msg->clipboard.len > 0) {
+            clipboard_write(msg->clipboard.text, msg->clipboard.len);
+            LOG_DBG("clipboard: received %zu bytes from %s",
+                    msg->clipboard.len, p->name);
+            free((void *)msg->clipboard.text);
+        }
         break;
 
     case MSG_INPUT: {
