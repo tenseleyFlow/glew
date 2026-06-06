@@ -35,29 +35,6 @@ int input_inject_init(void)
     return 0;
 }
 
-static unsigned int mods_to_x11(uint32_t mods)
-{
-    unsigned int state = 0;
-    if (mods & (1 << 0)) state |= ShiftMask;
-    if (mods & (1 << 1)) state |= LockMask;
-    if (mods & (1 << 2)) state |= ControlMask;
-    if (mods & (1 << 3)) state |= Mod1Mask;
-    if (mods & (1 << 6)) state |= Mod4Mask;
-    return state;
-}
-
-static int is_hold_modifier(uint32_t ks)
-{
-    /* skip hold-type modifiers — their state is carried in the mods field.
-     * Caps_Lock (0xffe5) and Num_Lock (0xffe6) are toggles and must be injected. */
-    return ks == 0xffe1 || ks == 0xffe2 ||  /* Shift_L, Shift_R */
-           ks == 0xffe3 || ks == 0xffe4 ||  /* Control_L, Control_R */
-           ks == 0xffe7 || ks == 0xffe8 ||  /* Meta_L, Meta_R */
-           ks == 0xffe9 || ks == 0xffea ||  /* Alt_L, Alt_R */
-           ks == 0xffeb || ks == 0xffec ||  /* Super_L, Super_R */
-           ks == 0xffed || ks == 0xffee;    /* Hyper_L, Hyper_R */
-}
-
 void input_inject_event(const input_event_t *ev)
 {
     if (!dpy) return;
@@ -67,28 +44,7 @@ void input_inject_event(const input_event_t *ev)
     case INPUT_KEY_UP: {
         KeyCode kc = XKeysymToKeycode(dpy, ev->keysym);
         if (kc == 0) break;
-
-        if (is_hold_modifier(ev->keysym)) {
-            XTestFakeKeyEvent(dpy, kc, ev->type == INPUT_KEY_DOWN, CurrentTime);
-            break;
-        }
-
-        Window focused;
-        int revert;
-        XGetInputFocus(dpy, &focused, &revert);
-
-        XEvent xev = {0};
-        xev.xkey.type = (ev->type == INPUT_KEY_DOWN) ? KeyPress : KeyRelease;
-        xev.xkey.display = dpy;
-        xev.xkey.window = focused;
-        xev.xkey.root = root;
-        xev.xkey.time = CurrentTime;
-        xev.xkey.keycode = kc;
-        xev.xkey.state = mods_to_x11(ev->mods);
-        xev.xkey.same_screen = True;
-
-        long mask = (ev->type == INPUT_KEY_DOWN) ? KeyPressMask : KeyReleaseMask;
-        XSendEvent(dpy, focused, True, mask, &xev);
+        XTestFakeKeyEvent(dpy, kc, ev->type == INPUT_KEY_DOWN, CurrentTime);
         break;
     }
     case INPUT_MOTION: {
