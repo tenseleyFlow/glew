@@ -382,7 +382,6 @@ static void on_peer_message(peer_t *p, const glew_msg_t *msg)
         release_all_modifiers();
         g_input_mode = MODE_LOCAL;
         g_input_source = NULL;
-        start_edge_watching();
         break;
 
     case MSG_INPUT: {
@@ -648,7 +647,6 @@ int main(int argc, char **argv)
     uv_signal_start(&g_sigterm, on_signal, SIGTERM);
 
     peer_mgr_start(&g_mgr);
-    start_edge_watching();
 
     LOG_INFO("glewd %s running (self=%s, wm=%s, port=%d, peers=%d)",
              GLEW_VERSION_STR, g_cfg.self_name, g_cfg.self_wm,
