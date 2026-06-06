@@ -68,6 +68,11 @@ void input_inject_event(const input_event_t *ev)
         KeyCode kc = XKeysymToKeycode(dpy, ev->keysym);
         if (kc == 0) break;
 
+        if (is_hold_modifier(ev->keysym)) {
+            XTestFakeKeyEvent(dpy, kc, ev->type == INPUT_KEY_DOWN, CurrentTime);
+            break;
+        }
+
         Window focused;
         int revert;
         XGetInputFocus(dpy, &focused, &revert);
