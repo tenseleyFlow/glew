@@ -65,12 +65,6 @@ void input_inject_event(const input_event_t *ev)
     switch (ev->type) {
     case INPUT_KEY_DOWN:
     case INPUT_KEY_UP: {
-        /* skip modifier-only key events — the modifier state is carried
-         * in the mods field of actual key events, and separate modifier
-         * KeyPress/KeyRelease confuses terminals on some X servers */
-        if (is_hold_modifier(ev->keysym))
-            break;
-
         KeyCode kc = XKeysymToKeycode(dpy, ev->keysym);
         if (kc == 0) break;
 
